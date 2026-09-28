@@ -471,6 +471,30 @@ git_pull_dir() {
 download_depends() {
     echo -e "${STEPS} Downloading dependency files..."
 
+    # Desk Box carries its verified board bootloader and AIC8800D80 firmware in
+    # this repository. Avoid importing the generic u-boot and firmware trees.
+    if [[ "${#build_armbian[@]}" -eq 1 && "${build_armbian[0]}" == "deskbox" ]]; then
+        deskbox_bootloader="${different_files}/deskbox/u-boot/bootloader.bin"
+        deskbox_firmware="${firmware_path}/aic8800_sdio"
+        deskbox_firmware_files=(
+            aic_userconfig_8800d80.txt
+            fmacfw_8800d80_u02.bin
+            fmacfwbt_8800d80_u02.bin
+            fw_adid_8800d80_u02.bin
+            fw_patch_8800d80_u02.bin
+            fw_patch_table_8800d80_u02.bin
+            lmacfw_rf_8800d80_u02.bin
+        )
+
+        [[ -s "${deskbox_bootloader}" ]] || error_msg "Missing Desk Box bootloader: [ ${deskbox_bootloader} ]"
+        for firmware_file in "${deskbox_firmware_files[@]}"; do
+            [[ -s "${deskbox_firmware}/${firmware_file}" ]] ||
+                error_msg "Missing Desk Box firmware: [ ${deskbox_firmware}/${firmware_file} ]"
+        done
+        echo -e "${INFO} Using repository-pinned Desk Box bootloader and AIC8800D80 firmware."
+        return
+    fi
+
     # Download Armbian u-boot files
     uboot_num="$(find "${uboot_path}/rockchip" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
     if [[ -n "${uboot_num}" && "${uboot_num}" -le "5" ]]; then
@@ -915,7 +939,10 @@ replace_kernel() {
     kernel_dtb="${kernel_path}/${conf_kernel_tags}/${kernel}/dtb-${PLATFORM}-${kernel_name}.tar.gz"
     kernel_modules="${kernel_path}/${conf_kernel_tags}/${kernel}/modules-${kernel_name}.tar.gz"
     kernel_header="${kernel_path}/${conf_kernel_tags}/${kernel}/header-${kernel_name}.tar.gz"
-    [[ -s "${kernel_boot}" && -s "${kernel_dtb}" && -s "${kernel_modules}" && -s "${kernel_header}" ]] || error_msg "The 4 kernel missing."
+    [[ -s "${kernel_boot}" && -s "${kernel_modules}" ]] || error_msg "The kernel boot/modules packages are missing."
+    if [[ "${board}" != "deskbox" ]]; then
+        [[ -s "${kernel_dtb}" && -s "${kernel_header}" ]] || error_msg "The kernel DTB/header packages are missing."
+    fi
 
     # 01. For /boot five files
     tar -mxzf ${kernel_boot} -C ${tag_bootfs}
@@ -927,20 +954,32 @@ replace_kernel() {
 
     # 02. For /boot/dtb/${PLATFORM}/*
     [[ -d "${tag_bootfs}/dtb/${PLATFORM}" ]] || mkdir -p ${tag_bootfs}/dtb/${PLATFORM}
-    tar -mxzf ${kernel_dtb} -C ${tag_bootfs}/dtb/${PLATFORM}
+    if [[ "${board}" == "deskbox" ]]; then
+        deskbox_dtb="${tag_bootfs}/dtb/${PLATFORM}/${FDTFILE}"
+        [[ -s "${deskbox_dtb}" ]] || error_msg "Desk Box DTB is missing: [ ${deskbox_dtb} ]"
+        find "${tag_bootfs}/dtb/${PLATFORM}" -mindepth 1 ! -path "${deskbox_dtb}" -delete
+    else
+        tar -mxzf ${kernel_dtb} -C ${tag_bootfs}/dtb/${PLATFORM}
+    fi
     [[ "${PLATFORM}" == "rockchip" ]] && ln -sf dtb ${tag_bootfs}/dtb-${kernel_name}
-    [[ "$(ls ${tag_bootfs}/dtb/${PLATFORM} -l 2>/dev/null | grep "^-" | wc -l)" -ge "2" ]] || error_msg "/boot/dtb/${PLATFORM} files is missing."
+    [[ -s "${tag_bootfs}/dtb/${PLATFORM}/${FDTFILE}" ]] || error_msg "/boot/dtb/${PLATFORM}/${FDTFILE} is missing."
 
     # 03. For /usr/src/linux-headers-${kernel_name}
     header_path="linux-headers-${kernel_name}"
     [[ -n "${tag_rootfs}" && -d "${tag_rootfs}/usr/src" ]] && rm -rf "${tag_rootfs}/usr/src"/linux-headers-* 2>/dev/null
-    mkdir -p "${tag_rootfs}/usr/src/${header_path}"
-    tar -mxzf "${kernel_header}" -C "${tag_rootfs}/usr/src/${header_path}"
-    [[ -d "${tag_rootfs}/usr/src/${header_path}/include" ]] || error_msg "/usr/src/${header_path}/include folder is missing."
+    if [[ "${board}" != "deskbox" ]]; then
+        mkdir -p "${tag_rootfs}/usr/src/${header_path}"
+        tar -mxzf "${kernel_header}" -C "${tag_rootfs}/usr/src/${header_path}"
+        [[ -d "${tag_rootfs}/usr/src/${header_path}/include" ]] || error_msg "/usr/src/${header_path}/include folder is missing."
+    fi
 
     # 04. For /usr/lib/modules/${kernel_name}
     tar -mxzf ${kernel_modules} -C ${tag_rootfs}/usr/lib/modules
-    (cd ${tag_rootfs}/usr/lib/modules/${kernel_name}/ && rm -f build source 2>/dev/null && ln -sf /usr/src/${header_path} build)
+    if [[ "${board}" == "deskbox" ]]; then
+        (cd ${tag_rootfs}/usr/lib/modules/${kernel_name}/ && rm -f build source 2>/dev/null)
+    else
+        (cd ${tag_rootfs}/usr/lib/modules/${kernel_name}/ && rm -f build source 2>/dev/null && ln -sf /usr/src/${header_path} build)
+    fi
     [[ "$(ls ${tag_rootfs}/usr/lib/modules/${kernel_name} -l 2>/dev/null | grep "^d" | wc -l)" -eq "1" ]] || error_msg "/usr/lib/modules kernel folder is missing."
 
     # Special procedures for flashing specific boards
@@ -1035,17 +1074,9 @@ refactor_rootfs() {
 
     # Remove the scripts contained in [ armbian-bsp-cli-odroidn2 ] that will cause the system to fail to start
     # [ dpkg -c armbian-bsp-cli-odroidn2_23.02.2_arm64.deb ] : https://paste.armbian.com/aloxuvokol
-    # Move usr/share/armbian to armbian.bak. [ dpkg -S boot.cmd ] : [ armbian-bsp-cli-odroidn2: /usr/share/armbian/boot.cmd ]
-    [[ -d "usr/share/armbian" ]] && {
-        # Avoid mv-into-existing failures on subsequent rebuilds against the same image.
-        rm -rf usr/share/armbian.bak
-        mv -f usr/share/armbian usr/share/armbian.bak
-    }
-    # Move usr/lib/nand-sata-install to bak-nand-sata-install [ Useless bootloader and u-boot ]
-    [[ -d "usr/lib/nand-sata-install" ]] && {
-        rm -rf usr/lib/bak-nand-sata-install
-        mv -f usr/lib/nand-sata-install usr/lib/bak-nand-sata-install
-    }
+    # Desk Box does not ship disabled copies of upstream board/install assets.
+    rm -rf usr/share/armbian usr/share/armbian.bak
+    rm -rf usr/lib/nand-sata-install usr/lib/bak-nand-sata-install
     # Remove invalid install file
     [[ "${PLATFORM}" == "rockchip" && -f "usr/sbin/armbian-install" ]] && rm -f usr/sbin/armbian-install
 
@@ -1075,7 +1106,7 @@ refactor_rootfs() {
     ln -sf usr/sbin sbin
     ln -sf /run/lock var/lock
     ln -sf /run var/run
-    ln -sf /usr/share/zoneinfo/Asia/Shanghai etc/localtime
+    ln -sf /usr/share/zoneinfo/Asia/Ho_Chi_Minh etc/localtime
     ln -sf armbian-ddbr usr/sbin/ddbr
 
     # Fix common releases permissions
@@ -1254,7 +1285,7 @@ refactor_rootfs() {
     random_macaddr="9E:61${mac_end}"
 
     # Optimize wifi/bluetooth module
-    [[ -d "usr/lib/firmware/brcm" ]] && (
+    [[ "${board}" != "deskbox" && -d "usr/lib/firmware/brcm" ]] && (
         cd usr/lib/firmware/brcm/ && rm -f ../*.hcd
 
         # gtking/gtking pro is bcm4356 wifi/bluetooth, wifi5 module AP6356S
@@ -1282,6 +1313,25 @@ refactor_rootfs() {
         ln -sf brcmfmac43455-sdio.bin brcmfmac43455-sdio.easepi,a2.bin
         ln -sf brcmfmac43455-sdio.clm_blob brcmfmac43455-sdio.easepi,a2.clm_blob
     )
+
+    if [[ "${board}" == "deskbox" ]]; then
+        # Keep only the repository-pinned AIC8800D80 firmware set. This also
+        # removes generic firmware inherited from the upstream base image.
+        find usr/lib/firmware -mindepth 1 -maxdepth 1 ! -name aic8800_sdio -exec rm -rf -- {} +
+
+        # Remove the generic multi-board startup/IRQ hooks even when they were
+        # already present in the upstream base image.
+        rm -f etc/custom_service/start_service.sh
+        rmdir etc/custom_service 2>/dev/null || true
+        rm -f etc/balance_irq etc/modules-load.d/ophub-load-list.conf usr/sbin/balethirq.pl
+        [[ -f etc/rc.local ]] && sed -i '\|/etc/custom_service/start_service.sh|d' etc/rc.local
+
+        # Remove build-time package metadata and caches from the final image.
+        rm -rf var/lib/apt/lists/*
+        rm -f var/cache/apt/archives/*.deb
+        rm -rf var/cache/apt/archives/partial/*
+        rm -f root/.bash_history
+    fi
 
     # Add custom Armbian information
     release_lines=(

@@ -46,9 +46,15 @@ The SD baseline was verified on the reference Desk Box:
 - AIC8800D80 firmware loaded and Wi-Fi connected;
 - Ethernet, SSH and systemd multi-user boot operational.
 
+The build uses the verified bootloader and AIC8800D80 firmware stored in this
+fork. It does not clone generic U-Boot or firmware repositories. Kernel
+boot/modules and the base Armbian image remain pinned external release assets.
+
 See
 [`build-armbian/armbian-files/different-files/deskbox/BOOTLOADER.md`](build-armbian/armbian-files/different-files/deskbox/BOOTLOADER.md)
-for the bootloader provenance and hashes.
+for the bootloader provenance and hashes, and
+[`build-armbian/armbian-files/different-files/deskbox/FIRMWARE.md`](build-armbian/armbian-files/different-files/deskbox/FIRMWARE.md)
+for the firmware allowlist, provenance and hashes.
 
 ## DTB source and safety
 

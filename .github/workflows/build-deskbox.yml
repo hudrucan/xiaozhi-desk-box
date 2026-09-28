@@ -24,6 +24,11 @@ on:
         required: true
         default: "6.1.157"
         type: string
+      kernel_sha256:
+        description: "SHA256 of the compressed rk35xx kernel bundle"
+        required: true
+        default: "7d9aa2f31ba5de469bfb3ed1730e3ceb0d49b263924caad5be1e2380c60b6879"
+        type: string
 
 permissions:
   contents: write
@@ -55,6 +60,15 @@ jobs:
           echo "9a828c14691cf3757789567317a1b1f6dabb748c457b40841bfef10b6b631f1c  ${dtb}" | sha256sum --check
           echo "c444ee835b693e903522aaee601626f3bf8bbfe0f896840cb9af11caa8422670  ${dts}" | sha256sum --check
           echo "f00a2e0b48fd29504292fc46007a505efe275f91b8b1863d499e6c141fc54eb8  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
+          firmware="build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio"
+          echo "995dbb9e4f2e7b19db838291f52be39af9ab673ad51b270c988216ccff1a720e  ${firmware}/aic_userconfig_8800d80.txt" | sha256sum --check
+          echo "6d121e015ff1fb90a90649627d663511804771b37f6cb44c97066cfc313a067a  ${firmware}/fmacfw_8800d80_u02.bin" | sha256sum --check
+          echo "465106f3bb2945bbdebea99f6cde9465ae00d5829e188499d42449cbdf4fe82c  ${firmware}/fmacfwbt_8800d80_u02.bin" | sha256sum --check
+          echo "a526cbd02fcdc495f049f3ad6b5933cb08cd984b16790c716a060d582fee1a56  ${firmware}/fw_adid_8800d80_u02.bin" | sha256sum --check
+          echo "26183182bf07f8f7581e82da8b606d222591a12c56772e75146588eef5196242  ${firmware}/fw_patch_8800d80_u02.bin" | sha256sum --check
+          echo "a9f663eb7443bc8046f2479cedfcdd93001eb64761f855317dbdbbc077f475cf  ${firmware}/fw_patch_table_8800d80_u02.bin" | sha256sum --check
+          echo "19b2d6b2320b67cb874c5c5c266a8f348cf423d00c0b22d4ad2c737cc603beab  ${firmware}/lmacfw_rf_8800d80_u02.bin" | sha256sum --check
+          test "$(find "${firmware}" -maxdepth 1 -type f | wc -l)" -eq 7
           grep -Eq '^r[0-9]+:Desk Box:rk3528:rk3528-deskbox\.dtb:.*:deskbox:yes$' \
             build-armbian/armbian-files/common-files/etc/model_database.conf
           grep -aFq 'Rockchip RK3528 Desk Box' "${dtb}"
@@ -130,6 +144,23 @@ jobs:
           echo "path=build/output/images/${UPSTREAM_IMAGE}" >> "${GITHUB_OUTPUT}"
           ls -lh "${destination}"
 
+      - name: Download exact rk35xx kernel bundle
+        env:
+          KERNEL_VERSION: ${{ inputs.kernel_version }}
+          KERNEL_SHA256: ${{ inputs.kernel_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          kernel_parent="build-armbian/kernel/rk35xx"
+          kernel_archive="${kernel_parent}/${KERNEL_VERSION}.tar.gz"
+          kernel_url="https://github.com/ophub/kernel/releases/download/kernel_rk35xx/${KERNEL_VERSION}.tar.gz"
+          mkdir -p "${kernel_parent}"
+          curl --fail --show-error --location --retry 3 --output "${kernel_archive}" "${kernel_url}"
+          echo "${KERNEL_SHA256}  ${kernel_archive}" | sha256sum --check
+          tar -mxzf "${kernel_archive}" -C "${kernel_parent}"
+          test -s "${kernel_parent}/${KERNEL_VERSION}/sha256sums"
+          rm -f "${kernel_archive}"
+
       - name: Rebuild Desk Box image
         uses: ./
         with:
@@ -169,6 +200,100 @@ jobs:
           echo "image_path=${image_path}" >> "${GITHUB_OUTPUT}"
           echo "checksum_path=${image_path}.sha256" >> "${GITHUB_OUTPUT}"
           ls -lh "${image_path}" "${image_path}.sha256"
+
+      - name: Audit final image read-only
+        env:
+          IMAGE_PATH: ${{ steps.output.outputs.image_path }}
+          KERNEL_VERSION: ${{ inputs.kernel_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_image="/builder/deskbox-audit.img"
+          audit_root="/builder/audit"
+          audit_loop=""
+
+          cleanup() {
+            sudo umount "${audit_root}/boot" 2>/dev/null || true
+            sudo umount "${audit_root}/root" 2>/dev/null || true
+            if [[ -n "${audit_loop}" ]]; then
+              sudo losetup --detach "${audit_loop}" 2>/dev/null || true
+            fi
+            rm -f "${audit_image}"
+          }
+          trap cleanup EXIT
+
+          rm -rf "${audit_root}"
+          mkdir -p "${audit_root}/boot" "${audit_root}/root"
+          gzip --decompress --stdout "${IMAGE_PATH}" > "${audit_image}"
+          audit_loop=$(sudo losetup --find --show --partscan --read-only "${audit_image}")
+          sudo udevadm settle
+          test -b "${audit_loop}p1"
+          test -b "${audit_loop}p2"
+          sudo mount -o ro,noload "${audit_loop}p1" "${audit_root}/boot"
+          sudo mount -o ro,noload "${audit_loop}p2" "${audit_root}/root"
+          lsblk --fs "${audit_loop}"
+
+          boot="${audit_root}/boot"
+          root="${audit_root}/root"
+          grep -qx 'fdtfile=rockchip/rk3528-deskbox.dtb' "${boot}/armbianEnv.txt"
+          echo "9a828c14691cf3757789567317a1b1f6dabb748c457b40841bfef10b6b631f1c  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
+          test "$(find "${boot}/dtb/rockchip" -type f -name '*.dtb' | wc -l)" -eq 1
+          if find "${boot}/dtb" -type f \( -name '*.dts' -o -name '*.dtbo' \) -print -quit | grep -q .; then
+            echo "Unexpected DTS/DTBO found in final image" >&2
+            exit 1
+          fi
+
+          test -z "$(find "${root}/usr/src" -maxdepth 1 -name 'linux-headers-*' -print -quit)"
+          test -z "$(find "${root}/usr/lib/modules" -type l \( -name build -o -name source \) -print -quit)"
+          find "${root}/usr/lib/modules" -type f -name 'aic8800_sdio_bsp.ko' -print -quit | grep -q .
+          find "${root}/usr/lib/modules" -type f -name 'aic8800_sdio_wlan.ko' -print -quit | grep -q .
+
+          test "$(cat "${root}/etc/timezone")" = 'Asia/Ho_Chi_Minh'
+          test "$(readlink "${root}/etc/localtime")" = '/usr/share/zoneinfo/Asia/Ho_Chi_Minh'
+          grep -qx 'options cfg80211 ieee80211_regdom=VN' "${root}/etc/modprobe.d/deskbox-regulatory.conf"
+
+          firmware="${root}/usr/lib/firmware"
+          test "$(find "${firmware}" -mindepth 1 -maxdepth 1 -printf '%f\n')" = 'aic8800_sdio'
+          echo "995dbb9e4f2e7b19db838291f52be39af9ab673ad51b270c988216ccff1a720e  ${firmware}/aic8800_sdio/aic_userconfig_8800d80.txt" | sha256sum --check
+          echo "6d121e015ff1fb90a90649627d663511804771b37f6cb44c97066cfc313a067a  ${firmware}/aic8800_sdio/fmacfw_8800d80_u02.bin" | sha256sum --check
+          echo "465106f3bb2945bbdebea99f6cde9465ae00d5829e188499d42449cbdf4fe82c  ${firmware}/aic8800_sdio/fmacfwbt_8800d80_u02.bin" | sha256sum --check
+          echo "a526cbd02fcdc495f049f3ad6b5933cb08cd984b16790c716a060d582fee1a56  ${firmware}/aic8800_sdio/fw_adid_8800d80_u02.bin" | sha256sum --check
+          echo "26183182bf07f8f7581e82da8b606d222591a12c56772e75146588eef5196242  ${firmware}/aic8800_sdio/fw_patch_8800d80_u02.bin" | sha256sum --check
+          echo "a9f663eb7443bc8046f2479cedfcdd93001eb64761f855317dbdbbc077f475cf  ${firmware}/aic8800_sdio/fw_patch_table_8800d80_u02.bin" | sha256sum --check
+          echo "19b2d6b2320b67cb874c5c5c266a8f348cf423d00c0b22d4ad2c737cc603beab  ${firmware}/aic8800_sdio/lmacfw_rf_8800d80_u02.bin" | sha256sum --check
+          test "$(find "${firmware}/aic8800_sdio" -maxdepth 1 -type f | wc -l)" -eq 7
+
+          test ! -e "${root}/etc/custom_service/start_service.sh"
+          test ! -e "${root}/etc/balance_irq"
+          test ! -e "${root}/etc/modules-load.d/ophub-load-list.conf"
+          test ! -e "${root}/usr/sbin/balethirq.pl"
+          if [[ -f "${root}/etc/rc.local" ]] && grep -q '/etc/custom_service/start_service.sh' "${root}/etc/rc.local"; then
+            echo "Generic startup hook remains in rc.local" >&2
+            exit 1
+          fi
+          test ! -e "${root}/usr/share/armbian.bak"
+          test ! -e "${root}/usr/lib/bak-nand-sata-install"
+          test -z "$(find "${root}/var/lib/apt/lists" -type f -print -quit)"
+          test -z "$(find "${root}/var/cache/apt/archives" -type f -name '*.deb' -print -quit)"
+          sudo test ! -e "${root}/root/.bash_history"
+
+          grep -qx "MODEL_NAME='Desk Box'" "${root}/etc/ophub-release"
+          grep -qx "FDTFILE='rk3528-deskbox.dtb'" "${root}/etc/ophub-release"
+          grep -qx "BOARD='deskbox'" "${root}/etc/ophub-release"
+          if grep -iEq 'x88|p51|h96' "${root}/etc/armbian-release" "${root}/etc/ophub-release" "${boot}/armbianEnv.txt"; then
+            echo "Foreign board identity found in active metadata" >&2
+            exit 1
+          fi
+
+          idb_hash=$(sudo dd if="${audit_image}" bs=512 skip=64 count=5120 status=none | sha256sum | awk '{print $1}')
+          loader_hash=$(sudo dd if="${audit_image}" bs=512 skip=64 count=16320 status=none | sha256sum | awk '{print $1}')
+          uboot_hash=$(sudo dd if="${audit_image}" bs=512 skip=16384 count=16384 status=none | sha256sum | awk '{print $1}')
+          test "${idb_hash}" = 'a652135b8f9c00997a6739bd5356cb5758cee539b40fc88fb2f5b844891a9b16'
+          test "${loader_hash}" = '50533be4f13708af21f74693f2240fc0e5867f045d0d143249654abc3fb0eb44'
+          test "${uboot_hash}" = '2bef85bc03009c53078c310fd4447cd24bccbb2c2b5fd2e5bff74aa618ec17c1'
+
+          echo "Desk Box final-image audit passed."
+          sudo du -sh "${boot}" "${root}" "${IMAGE_PATH}"
 
       - name: Upload Desk Box image to this fork's Release
         env:
