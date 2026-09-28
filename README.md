@@ -24,7 +24,7 @@ the same runtime SoC fixup seen on the reference device, where Linux reports
 Run the **Build Desk Box image** workflow from the Actions page. Its defaults
 rebuild the pinned Bookworm arm64 server image with kernel `6.1.157` and publish
 the resulting image plus SHA256 file to the release tag
-`deskbox-bookworm-6.1.157`.
+`desk-box-rk3528-6.1.157`.
 
 Local rebuilds require GNU/Linux x86_64 or a compatible GitHub Actions runner:
 

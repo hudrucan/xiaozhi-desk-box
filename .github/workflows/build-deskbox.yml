@@ -168,7 +168,7 @@ jobs:
       - name: Upload Desk Box image to this fork's Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: deskbox-bookworm-${{ inputs.kernel_version }}
+          RELEASE_TAG: desk-box-rk3528-${{ inputs.kernel_version }}
           IMAGE_PATH: ${{ steps.output.outputs.image_path }}
           CHECKSUM_PATH: ${{ steps.output.outputs.checksum_path }}
           UPSTREAM_TAG: ${{ inputs.upstream_tag }}
@@ -179,7 +179,7 @@ jobs:
           if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release create "${RELEASE_TAG}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --title "Desk Box Bookworm / rk35xx-${{ inputs.kernel_version }}" \
+              --title "desk-box-rk3528-${{ inputs.kernel_version }}" \
               --notes "Target: deskbox. Base: ${UPSTREAM_REPOSITORY}@${UPSTREAM_TAG}/${UPSTREAM_IMAGE}. Source commit: ${GITHUB_SHA}."
           fi
           gh release upload "${RELEASE_TAG}" "${IMAGE_PATH}" "${CHECKSUM_PATH}" \
