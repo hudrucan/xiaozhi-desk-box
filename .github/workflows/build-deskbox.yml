@@ -262,17 +262,24 @@ jobs:
           echo "a9f663eb7443bc8046f2479cedfcdd93001eb64761f855317dbdbbc077f475cf  ${firmware}/aic8800_sdio/fw_patch_table_8800d80_u02.bin" | sha256sum --check
           echo "19b2d6b2320b67cb874c5c5c266a8f348cf423d00c0b22d4ad2c737cc603beab  ${firmware}/aic8800_sdio/lmacfw_rf_8800d80_u02.bin" | sha256sum --check
           test "$(find "${firmware}/aic8800_sdio" -maxdepth 1 -type f | wc -l)" -eq 7
+          echo "AIC8800D80 firmware allowlist passed."
 
-          test ! -e "${root}/etc/custom_service/start_service.sh"
-          test ! -e "${root}/etc/balance_irq"
-          test ! -e "${root}/etc/modules-load.d/ophub-load-list.conf"
-          test ! -e "${root}/usr/sbin/balethirq.pl"
+          assert_absent() {
+            if [[ -e "$1" ]]; then
+              echo "Unexpected final-image path: $1" >&2
+              exit 1
+            fi
+          }
+          assert_absent "${root}/etc/custom_service/start_service.sh"
+          assert_absent "${root}/etc/balance_irq"
+          assert_absent "${root}/etc/modules-load.d/ophub-load-list.conf"
+          assert_absent "${root}/usr/sbin/balethirq.pl"
           if [[ -f "${root}/etc/rc.local" ]] && grep -q '/etc/custom_service/start_service.sh' "${root}/etc/rc.local"; then
             echo "Generic startup hook remains in rc.local" >&2
             exit 1
           fi
-          test ! -e "${root}/usr/share/armbian.bak"
-          test ! -e "${root}/usr/lib/bak-nand-sata-install"
+          assert_absent "${root}/usr/share/armbian.bak"
+          assert_absent "${root}/usr/lib/bak-nand-sata-install"
           if [[ -d "${root}/var/lib/apt/lists" ]] && find "${root}/var/lib/apt/lists" -type f -print -quit | grep -q .; then
             echo "APT package lists remain in final image" >&2
             exit 1
@@ -281,11 +288,16 @@ jobs:
             echo "APT package cache remains in final image" >&2
             exit 1
           fi
-          sudo test ! -e "${root}/root/.bash_history"
+          if sudo test -e "${root}/root/.bash_history"; then
+            echo "Root shell history remains in final image" >&2
+            exit 1
+          fi
+          echo "Generic startup, backup and package-cache cleanup passed."
 
-          grep -qx "MODEL_NAME='Desk Box'" "${root}/etc/ophub-release"
-          grep -qx "FDTFILE='rk3528-deskbox.dtb'" "${root}/etc/ophub-release"
-          grep -qx "BOARD='deskbox'" "${root}/etc/ophub-release"
+          grep -E '^(MODEL_NAME|FDTFILE|BOARD)=' "${root}/etc/ophub-release"
+          grep -qx "MODEL_NAME='Desk Box'" "${root}/etc/ophub-release" || { echo "Desk Box model metadata missing" >&2; exit 1; }
+          grep -qx "FDTFILE='rk3528-deskbox.dtb'" "${root}/etc/ophub-release" || { echo "Desk Box FDT metadata missing" >&2; exit 1; }
+          grep -qx "BOARD='deskbox'" "${root}/etc/ophub-release" || { echo "Desk Box board metadata missing" >&2; exit 1; }
           if grep -iEq 'x88|p51|h96' "${root}/etc/armbian-release" "${root}/etc/ophub-release" "${boot}/armbianEnv.txt"; then
             echo "Foreign board identity found in active metadata" >&2
             exit 1
@@ -294,6 +306,7 @@ jobs:
           idb_hash=$(sudo dd if="${audit_image}" bs=512 skip=64 count=5120 status=none | sha256sum | awk '{print $1}')
           loader_hash=$(sudo dd if="${audit_image}" bs=512 skip=64 count=16320 status=none | sha256sum | awk '{print $1}')
           uboot_hash=$(sudo dd if="${audit_image}" bs=512 skip=16384 count=16384 status=none | sha256sum | awk '{print $1}')
+          printf 'idbloader copies: %s\nidbloader area:   %s\nU-Boot region:    %s\n' "${idb_hash}" "${loader_hash}" "${uboot_hash}"
           test "${idb_hash}" = 'a652135b8f9c00997a6739bd5356cb5758cee539b40fc88fb2f5b844891a9b16'
           test "${loader_hash}" = '50533be4f13708af21f74693f2240fc0e5867f045d0d143249654abc3fb0eb44'
           test "${uboot_hash}" = '2bef85bc03009c53078c310fd4447cd24bccbb2c2b5fd2e5bff74aa618ec17c1'
