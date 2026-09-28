@@ -57,8 +57,8 @@ jobs:
           echo "f00a2e0b48fd29504292fc46007a505efe275f91b8b1863d499e6c141fc54eb8  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
           grep -Eq '^r[0-9]+:Desk Box:rk3528:rk3528-deskbox\.dtb:.*:deskbox:yes$' \
             build-armbian/armbian-files/common-files/etc/model_database.conf
-          strings "${dtb}" | grep -qx 'Rockchip RK3528 Desk Box'
-          strings "${dtb}" | grep -qx 'AIC8800D80'
+          grep -aFq 'Rockchip RK3528 Desk Box' "${dtb}"
+          grep -aFq 'AIC8800D80' "${dtb}"
           test "$(cat build-armbian/armbian-files/different-files/deskbox/rootfs/etc/timezone)" = "Asia/Ho_Chi_Minh"
           grep -qx 'options cfg80211 ieee80211_regdom=VN' \
             build-armbian/armbian-files/different-files/deskbox/rootfs/etc/modprobe.d/deskbox-regulatory.conf
