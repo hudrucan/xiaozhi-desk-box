@@ -1,5 +1,5 @@
 # Rebuild the known Bookworm base image as the standalone Desk Box target.
-name: Build Desk Box image
+name: Build Desk Box Image
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ env:
 
 jobs:
   build:
-    name: Desk Box / Bookworm / rk35xx-${{ inputs.kernel_version }}
+    name: rk35xx-${{ inputs.kernel_version }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
 
