@@ -273,8 +273,14 @@ jobs:
           fi
           test ! -e "${root}/usr/share/armbian.bak"
           test ! -e "${root}/usr/lib/bak-nand-sata-install"
-          test -z "$(find "${root}/var/lib/apt/lists" -type f -print -quit)"
-          test -z "$(find "${root}/var/cache/apt/archives" -type f -name '*.deb' -print -quit)"
+          if [[ -d "${root}/var/lib/apt/lists" ]] && find "${root}/var/lib/apt/lists" -type f -print -quit | grep -q .; then
+            echo "APT package lists remain in final image" >&2
+            exit 1
+          fi
+          if [[ -d "${root}/var/cache/apt/archives" ]] && find "${root}/var/cache/apt/archives" -type f -name '*.deb' -print -quit | grep -q .; then
+            echo "APT package cache remains in final image" >&2
+            exit 1
+          fi
           sudo test ! -e "${root}/root/.bash_history"
 
           grep -qx "MODEL_NAME='Desk Box'" "${root}/etc/ophub-release"
