@@ -325,11 +325,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          release_title="desk-box-rk3528-${{ inputs.kernel_version }}"
+          release_notes="Target: deskbox. Base: ${UPSTREAM_REPOSITORY}@${UPSTREAM_TAG}/${UPSTREAM_IMAGE}. Source commit: ${GITHUB_SHA}."
           if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release create "${RELEASE_TAG}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --title "desk-box-rk3528-${{ inputs.kernel_version }}" \
-              --notes "Target: deskbox. Base: ${UPSTREAM_REPOSITORY}@${UPSTREAM_TAG}/${UPSTREAM_IMAGE}. Source commit: ${GITHUB_SHA}."
+              --title "${release_title}" \
+              --notes "${release_notes}"
+          else
+            gh release edit "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${release_title}" \
+              --notes "${release_notes}"
           fi
           gh release upload "${RELEASE_TAG}" "${IMAGE_PATH}" "${CHECKSUM_PATH}" \
             --repo "${GITHUB_REPOSITORY}" \
