@@ -51,6 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2  build-armbian/armbian-files/platform-files/rockchip/bootfs/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
+          echo "f00a2e0b48fd29504292fc46007a505efe275f91b8b1863d499e6c141fc54eb8  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
           grep -Eq '^r[0-9]+[[:space:]]+:Desk Box[[:space:]]+:rk3528[[:space:]]+:rk3528-deskbox\.dtb.*:deskbox[[:space:]]+:yes$' \
             build-armbian/armbian-files/common-files/etc/model_database.conf
 
