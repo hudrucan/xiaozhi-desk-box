@@ -159,8 +159,13 @@ jobs:
             exit 1
           fi
 
-          image_path="${images[0]}"
-          sha256sum "${image_path}" > "${image_path}.sha256"
+          compact_name="desk-box-rk3528-${KERNEL_VERSION}.img.gz"
+          image_path="${output_directory}/${compact_name}"
+          mv -- "${images[0]}" "${image_path}"
+          (
+            cd "${output_directory}"
+            sha256sum "${compact_name}" > "${compact_name}.sha256"
+          )
           echo "image_path=${image_path}" >> "${GITHUB_OUTPUT}"
           echo "checksum_path=${image_path}.sha256" >> "${GITHUB_OUTPUT}"
           ls -lh "${image_path}" "${image_path}.sha256"
