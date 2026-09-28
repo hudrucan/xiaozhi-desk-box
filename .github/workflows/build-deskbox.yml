@@ -295,7 +295,7 @@ jobs:
           echo "Generic startup, backup and package-cache cleanup passed."
 
           grep -E '^(MODEL_NAME|FDTFILE|BOARD)=' "${root}/etc/ophub-release"
-          grep -qx "MODEL_NAME='Desk Box'" "${root}/etc/ophub-release" || { echo "Desk Box model metadata missing" >&2; exit 1; }
+          grep -qx "MODEL_NAME='DeskBox'" "${root}/etc/ophub-release" || { echo "Desk Box model metadata missing" >&2; exit 1; }
           grep -qx "FDTFILE='rk3528-deskbox.dtb'" "${root}/etc/ophub-release" || { echo "Desk Box FDT metadata missing" >&2; exit 1; }
           grep -qx "BOARD='deskbox'" "${root}/etc/ophub-release" || { echo "Desk Box board metadata missing" >&2; exit 1; }
           if grep -iEq 'x88|p51|h96' "${root}/etc/armbian-release" "${root}/etc/ophub-release" "${boot}/armbianEnv.txt"; then
