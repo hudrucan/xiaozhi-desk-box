@@ -799,7 +799,10 @@ make_image() {
 
     # Write the specific bootloader for [ Rockchip ] boxes
     [[ "${PLATFORM}" == "rockchip" ]] && {
-        bootloader_path="${uboot_path}/${PLATFORM}/${board}"
+        # Desk Box uses the known-good X88Pro13 bootloader without inheriting its board identity.
+        bootloader_board="${board}"
+        [[ "${board}" == "deskbox" ]] && bootloader_board="x88pro13"
+        bootloader_path="${uboot_path}/${PLATFORM}/${bootloader_board}"
         if [[ -n "${BOOTLOADER_IMG}" && -f "${bootloader_path}/${BOOTLOADER_IMG}" ]] &&
             [[ -n "${MAINLINE_UBOOT}" && -f "${bootloader_path}/${MAINLINE_UBOOT}" ]] &&
             [[ -n "${TRUST_IMG}" && -f "${bootloader_path}/${TRUST_IMG}" ]]; then
