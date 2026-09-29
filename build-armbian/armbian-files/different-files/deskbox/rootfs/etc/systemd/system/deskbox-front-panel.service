@@ -1,0 +1,12 @@
+[Unit]
+Description=Desk Box FD6551 front-panel clock
+After=systemd-modules-load.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/deskbox-front-panel
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target

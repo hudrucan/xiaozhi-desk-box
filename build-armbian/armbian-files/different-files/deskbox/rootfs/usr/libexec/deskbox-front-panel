@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""Drive the Desk Box FD6551 clock and connectivity indicators."""
+
+import fcntl
+import glob
+import os
+import signal
+import time
+from datetime import datetime
+
+
+CLK_PIN = 131  # RK3528 GPIO4_A3
+DAT_PIN = 130  # RK3528 GPIO4_A2
+GPIO_PATH = "/sys/class/gpio/gpio{pin}"
+LOCK_PATH = "/run/lock/deskbox-front-panel.lock"
+
+MODE_ADDR = 0x48
+ICON_ADDR = 0x66
+DIGIT_ADDRS = (0x68, 0x6A, 0x6C, 0x6E)
+HALF_CLOCK = 0.000005
+GPIO_FDS = {}
+
+DIGITS = {
+    "0": 0x3F,
+    "1": 0x06,
+    "2": 0x5B,
+    "3": 0x4F,
+    "4": 0x66,
+    "5": 0x6D,
+    "6": 0x7D,
+    "7": 0x07,
+    "8": 0x7F,
+    "9": 0x6F,
+}
+
+# Hardware-verified on the Desk Box front panel.
+ICON_CLOCK = 0x01
+ICON_USB = 0x02
+ICON_PAUSE = 0x04
+ICON_PLAY = 0x08
+ICON_COLON = 0x10
+ICON_LAN = 0x20
+ICON_WIFI = 0x40
+
+
+def write_text(path, value):
+    with open(path, "w", encoding="ascii") as stream:
+        stream.write(str(value))
+
+
+def export_pin(pin):
+    path = GPIO_PATH.format(pin=pin)
+    if not os.path.isdir(path):
+        write_text("/sys/class/gpio/export", pin)
+        for _ in range(100):
+            if os.path.isdir(path):
+                break
+            time.sleep(0.001)
+        else:
+            raise RuntimeError(f"gpio{pin} did not appear after export")
+    write_text(path + "/direction", "out")
+    GPIO_FDS[pin] = os.open(path + "/value", os.O_WRONLY | os.O_CLOEXEC)
+
+
+def set_gpio(pin, value):
+    descriptor = GPIO_FDS[pin]
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    os.write(descriptor, b"1" if value else b"0")
+
+
+def clk(value):
+    set_gpio(CLK_PIN, value)
+
+
+def dat(value):
+    set_gpio(DAT_PIN, value)
+
+
+def start():
+    dat(1)
+    clk(1)
+    time.sleep(HALF_CLOCK)
+    dat(0)
+    time.sleep(HALF_CLOCK)
+    clk(0)
+    time.sleep(HALF_CLOCK)
+
+
+def stop():
+    dat(0)
+    clk(0)
+    time.sleep(HALF_CLOCK)
+    clk(1)
+    time.sleep(HALF_CLOCK)
+    dat(1)
+    time.sleep(HALF_CLOCK)
+
+
+def write_byte(value):
+    for bit in range(7, -1, -1):
+        dat((value >> bit) & 1)
+        time.sleep(HALF_CLOCK)
+        clk(1)
+        time.sleep(HALF_CLOCK)
+        clk(0)
+        time.sleep(HALF_CLOCK)
+    dat(1)
+    time.sleep(HALF_CLOCK)
+    clk(1)
+    time.sleep(HALF_CLOCK)
+    clk(0)
+    time.sleep(HALF_CLOCK)
+
+
+def write_register(address, value):
+    start()
+    write_byte(address)
+    write_byte(value)
+    stop()
+
+
+def initialize():
+    export_pin(CLK_PIN)
+    export_pin(DAT_PIN)
+    clk(0)
+    dat(1)
+    # Exact seller sequence verified on the reference Desk Box.
+    write_register(MODE_ADDR, 0x01)
+    write_register(MODE_ADDR, 0x03)
+    time.sleep(0.05)
+
+
+def read_text(path):
+    try:
+        with open(path, "r", encoding="ascii") as stream:
+            return stream.read().strip()
+    except OSError:
+        return ""
+
+
+def carrier(interface):
+    return read_text(f"/sys/class/net/{interface}/carrier") == "1"
+
+
+def external_usb_present():
+    for path in glob.glob("/sys/bus/usb/devices/*"):
+        name = os.path.basename(path)
+        if name.startswith("usb") or ":" in name:
+            continue
+        if os.path.isfile(os.path.join(path, "idVendor")):
+            if read_text(os.path.join(path, "bDeviceClass")) != "09":
+                return True
+    return False
+
+
+def connectivity_icons(now):
+    mask = ICON_COLON if now.second % 2 == 0 else 0
+    if carrier("wlan0"):
+        mask |= ICON_WIFI
+    if carrier("end0"):
+        mask |= ICON_LAN
+    if external_usb_present():
+        mask |= ICON_USB
+    return mask
+
+
+def main():
+    if os.geteuid() != 0:
+        raise SystemExit("deskbox-front-panel must run as root")
+
+    stopping = False
+
+    def request_stop(_signum, _frame):
+        nonlocal stopping
+        stopping = True
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+    os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
+    with open(LOCK_PATH, "w", encoding="ascii") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        initialize()
+        previous_digits = None
+        previous_icons = None
+
+        while not stopping:
+            now = datetime.now()
+            digits = f"{now.hour:02d}{now.minute:02d}"
+            icons = connectivity_icons(now)
+
+            if digits != previous_digits:
+                for address, character in zip(DIGIT_ADDRS, digits):
+                    write_register(address, DIGITS[character])
+                previous_digits = digits
+            if icons != previous_icons:
+                write_register(ICON_ADDR, icons)
+                previous_icons = icons
+            time.sleep(0.2)
+
+
+if __name__ == "__main__":
+    main()

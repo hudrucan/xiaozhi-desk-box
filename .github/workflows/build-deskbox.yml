@@ -72,7 +72,10 @@ jobs:
           echo "e99de09d48321f36f87d9e0017c57b57c6e38203b17b28640094a18c1d98905d  build-armbian/armbian-files/different-files/deskbox/packages/bluez_5.66-1+deb12u2_arm64.deb" | sha256sum --check
           echo "f9a3003b6bb7bb79c6d017355c3ce6ba9b64d7f32fb95a8bf8158d6185c04f41  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready" | sha256sum --check
           echo "088286af9ea29fea3f0305d6c9abbae15572c208c9633e499253f313c32e1201  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-bluetooth.service" | sha256sum --check
+          echo "4f1652c654a559e98a6671d4af2a16c7f0336621bab807bcddddbf5c6761e61d  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-front-panel" | sha256sum --check
+          echo "7bc67bff8a89a07883f0584a4c75689effd1c9d29bf317dd041a72ccb7253f5d  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel.service" | sha256sum --check
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready
+          test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-front-panel
           grep -Eq '^r[0-9]+:Desk Box:rk3528:rk3528-deskbox\.dtb:.*:deskbox:yes$' \
             build-armbian/armbian-files/common-files/etc/model_database.conf
           grep -aFq 'Rockchip RK3528 Generic TV Box' "${dtb}"
@@ -297,6 +300,13 @@ jobs:
           test -L "${root}/etc/systemd/system/dbus-org.bluez.service"
           echo "Pinned BlueZ package, Desk Box HCI payload and service enablement passed."
 
+          echo "4f1652c654a559e98a6671d4af2a16c7f0336621bab807bcddddbf5c6761e61d  ${root}/usr/libexec/deskbox-front-panel" | sha256sum --check
+          echo "7bc67bff8a89a07883f0584a4c75689effd1c9d29bf317dd041a72ccb7253f5d  ${root}/etc/systemd/system/deskbox-front-panel.service" | sha256sum --check
+          test -x "${root}/usr/libexec/deskbox-front-panel"
+          test -x "${root}/usr/bin/python3"
+          test "$(readlink "${root}/etc/systemd/system/multi-user.target.wants/deskbox-front-panel.service")" = '../deskbox-front-panel.service'
+          echo "FD6551 front-panel payload and service enablement passed."
+
           assert_absent() {
             if [[ -e "$1" ]]; then
               echo "Unexpected final-image path: $1" >&2
@@ -381,6 +391,7 @@ jobs:
             '- Wi-Fi: AIC8800D80 SDIO, VN regulatory domain' \
             '- GPU: Lima (Mali-450)' \
             '- Bluetooth: AIC8800D80 H4 over UART2_M0 at 1.5 Mbps, BlueZ 5.66' \
+            '- Front panel: FD6551 HH:MM clock with Wi-Fi, LAN and USB status' \
             "- File: \`${image_name}\`" \
             "- SHA256: \`${image_sha256}\`" \
             '' \
@@ -396,6 +407,7 @@ jobs:
             '- Final image mounted read-only and audited.' \
             '- Desk Box identity, Lima + UART2_M0 DTB delta, regulatory database and AIC8800D80 firmware allowlist verified.' \
             '- BlueZ, UART2_M0 pinmux and automatic HCI service payload/enablement verified.' \
+            '- FD6551 front-panel payload and automatic service enablement verified.' \
             '- Kernel release, AIC8800 SDIO modules and raw bootloader regions verified.' \
             '- Generic updater/sync/software-center helpers and build artifacts absent.' \
             '' \

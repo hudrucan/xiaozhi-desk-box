@@ -45,6 +45,7 @@ device.
 | Wi-Fi | AIC8800D80 over SDIO |
 | GPU | Mali-450 using Lima |
 | Bluetooth | AIC8800D80 H4 over UART2_M0 at 1.5 Mbps; BlueZ 5.66 |
+| Front panel | FD6551 HH:MM clock with Wi-Fi, LAN and USB status |
 | Timezone / regulatory domain | `Asia/Ho_Chi_Minh` / `VN` |
 
 The project intentionally does not build a kernel or U-Boot. It assembles a
@@ -58,14 +59,16 @@ The reference Desk Box uses:
 - Rockchip RK3528;
 - 4 GB Micron DDR3 and 32 GB eMMC;
 - AIC8800D80 SDIO Wi-Fi;
+- FD6551-compatible four-digit front panel;
 - Ethernet and removable microSD storage.
 
 The functional baseline for this profile was boot-tested from microSD with
-Ethernet, SSH, multi-user systemd startup, AIC8800D80 Wi-Fi, Lima graphics and
-Bluetooth operational. Bluetooth HCI Reset, BR/EDR + LE controller discovery
-and a BlueZ scan were validated over UART2_M0 at 1.5 Mbps with hardware flow
-control. Each newly published image still requires a hardware boot test.
-Installing to eMMC is outside this repository's automated test scope.
+Ethernet, SSH, multi-user systemd startup, AIC8800D80 Wi-Fi, Lima graphics,
+Bluetooth and the FD6551 front panel operational. Bluetooth HCI Reset, BR/EDR
+and LE controller discovery and a BlueZ scan were validated over UART2_M0 at
+1.5 Mbps with hardware flow control. Each newly published image still requires
+a hardware boot test. Installing to eMMC is outside this repository's
+automated test scope.
 
 ## Download and first boot
 
@@ -104,7 +107,7 @@ the image rebuild engine directly.
 flowchart LR
     base["Pinned Bookworm base image"] --> rebuild["Desk Box rebuild"]
     kernel["Pinned rk35xx kernel bundle"] --> rebuild
-    payloads["DTB + bootloader + AIC8800D80 firmware + BlueZ"] --> rebuild
+    payloads["DTB + bootloader + AIC8800D80 firmware + BlueZ + front panel"] --> rebuild
     rebuild --> image["desk-box-rk3528-6.1.174-rN-aN.img.gz"]
     image --> audit["Read-only image audit"]
     audit --> release["GitHub Release"]
@@ -175,6 +178,12 @@ from the serial console/getty and starts `btattach` only after the AIC8800D80
 SDIO functions bind. The service uses the hardware-validated H4 transport at
 1.5 Mbps; it does not toggle unverified GPIOs. See
 [`PACKAGES.md`](build-armbian/armbian-files/different-files/deskbox/PACKAGES.md).
+
+The hardware-validated front-panel service displays local `HH:MM`, blinks the
+colon and reflects Wi-Fi, LAN and external USB state. Clock/alarm, play and
+pause remain unused. The service bit-bangs the seller-proven FD6551 protocol on
+GPIO4_A2/A3 and requires no DTB change. See
+[`PANEL.md`](build-armbian/armbian-files/different-files/deskbox/PANEL.md).
 
 ## Repository map
 

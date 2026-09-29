@@ -1273,6 +1273,8 @@ refactor_rootfs() {
         mkdir -p etc/systemd/system/multi-user.target.wants
         ln -sfn ../deskbox-bluetooth.service \
             etc/systemd/system/multi-user.target.wants/deskbox-bluetooth.service
+        ln -sfn ../deskbox-front-panel.service \
+            etc/systemd/system/multi-user.target.wants/deskbox-front-panel.service
 
         # Keep only the repository-pinned AIC8800D80 firmware and the tested
         # regulatory database/signature required during early module probing.
