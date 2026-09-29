@@ -626,6 +626,31 @@ assert_target_mount_mode() {
     done
 }
 
+create_target_mountpoints() {
+    # The /*** rsync exclusions intentionally omit both pseudo-filesystem
+    # contents and their top-level directories.  Recreate the empty mountpoints
+    # required by initramfs run-init/systemd before the target is unmounted.
+    log "Creating required empty system mountpoints on eMMC."
+    install -d -m 0755 \
+        "${TARGET_ROOT_MOUNT}/dev" \
+        "${TARGET_ROOT_MOUNT}/run" \
+        "${TARGET_ROOT_MOUNT}/mnt" \
+        "${TARGET_ROOT_MOUNT}/media"
+    install -d -m 0555 \
+        "${TARGET_ROOT_MOUNT}/proc" \
+        "${TARGET_ROOT_MOUNT}/sys"
+    install -d -m 1777 "${TARGET_ROOT_MOUNT}/tmp"
+}
+
+verify_target_directory_mode() {
+    local relative_path=$1 expected_mode=$2 actual_mode
+    [[ -d "${TARGET_ROOT_MOUNT}/${relative_path}" ]] || \
+        die "Target ROOTFS is missing required /${relative_path} mountpoint."
+    actual_mode=$(stat -c '%a' "${TARGET_ROOT_MOUNT}/${relative_path}")
+    [[ "${actual_mode}" == "${expected_mode}" ]] || \
+        die "Target /${relative_path} mode is ${actual_mode}, expected ${expected_mode}."
+}
+
 copy_filesystems() {
     local -a root_args
     mount_target_rw
@@ -643,6 +668,7 @@ copy_filesystems() {
     assert_target_mounts
     assert_target_mount_mode rw
     run_rsync "${root_args[@]}" / "${TARGET_ROOT_MOUNT}/"
+    create_target_mountpoints
     log "Copying the SD BOOT filesystem to eMMC."
     assert_target_mounts
     assert_target_mount_mode rw
@@ -764,6 +790,13 @@ verify_target_read_only() {
     mount -o ro,noload "${TARGET_BOOT}" "${TARGET_BOOT_MOUNT}"
     assert_target_mounts
     assert_target_mount_mode ro
+    verify_target_directory_mode dev 755
+    verify_target_directory_mode proc 555
+    verify_target_directory_mode sys 555
+    verify_target_directory_mode run 755
+    verify_target_directory_mode tmp 1777
+    verify_target_directory_mode mnt 755
+    verify_target_directory_mode media 755
     verify_boot_filesystem_profile "${TARGET_BOOT}" "Final eMMC BOOT"
     target_dtb_hash=$(sha256sum "${TARGET_BOOT_MOUNT}/dtb/rockchip/rk3528-deskbox.dtb" | awk '{print $1}')
     [[ "${target_dtb_hash}" == "${source_dtb_hash}" && "${target_dtb_hash}" == "${DTB_SHA256}" ]] || die "Target Desk Box DTB failed exact-hash verification."
