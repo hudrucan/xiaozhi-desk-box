@@ -56,8 +56,14 @@ All offsets below use 512-byte sectors:
 | U-Boot/FIT/ATF | `16384-32767` | Audited `bootloader.bin` |
 | BOOT ext4 | `32768-1079295` | Clean filesystem populated from SD `/boot` |
 | Alignment gap | `1079296-1081343` | Unallocated |
-| ROOTFS ext4 | `1081344` to the last usable GPT sector | Clean filesystem populated from SD `/` |
+| ROOTFS ext4 | `1081344` to the final complete 2048-sector boundary minus one | Clean filesystem populated from SD `/` |
+| GPT alignment gap | End of ROOTFS to the last usable GPT sector | Unallocated |
 | Backup GPT | Final 33 sectors | Newly generated |
+
+For the verified 32 GB `BJNB4R` eMMC, ROOTFS is explicitly
+`1081344-61069311` (`59987968` sectors), followed by the unallocated alignment
+range `61069312-61071326`. The explicit size prevents `sfdisk` alignment policy
+from disagreeing with the post-partition geometry verifier.
 
 The installer clears the entire old 16 MiB pre-partition area before creating
 the GPT, then writes back only the audited IDB/SPL and U-Boot/FIT regions.

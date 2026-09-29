@@ -25,6 +25,7 @@ readonly UBOOT_SECTORS=16384
 readonly BOOT_START=32768
 readonly BOOT_SECTORS=1046528
 readonly ROOT_START=1081344
+readonly PARTITION_ALIGNMENT_SECTORS=2048
 readonly TAIL_BACKUP_SECTORS=8192
 readonly LINUX_GPT_TYPE="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 readonly TARGET_MIN_BYTES=$((28 * 1024 * 1024 * 1024))
@@ -60,6 +61,8 @@ SOURCE_BOOT_FSTAB_PASS=""
 TARGET_SECTORS=0
 TARGET_BYTES=0
 TARGET_LAST_USABLE=0
+TARGET_ROOT_END=0
+TARGET_ROOT_SECTORS=0
 TARGET_NAME=""
 TARGET_CID=""
 BACKUP_DIR=""
@@ -369,6 +372,9 @@ preflight() {
     TARGET_SECTORS=$(blockdev --getsz "${TARGET_DISK}")
     TARGET_BYTES=$(blockdev --getsize64 "${TARGET_DISK}")
     TARGET_LAST_USABLE=$((TARGET_SECTORS - 34))
+    TARGET_ROOT_END=$((((TARGET_LAST_USABLE + 1) / PARTITION_ALIGNMENT_SECTORS) * PARTITION_ALIGNMENT_SECTORS - 1))
+    TARGET_ROOT_SECTORS=$((TARGET_ROOT_END - ROOT_START + 1))
+    ((TARGET_ROOT_SECTORS > 0 && TARGET_ROOT_SECTORS % PARTITION_ALIGNMENT_SECTORS == 0)) || die "Cannot derive an aligned ROOTFS partition size."
     ((TARGET_BYTES >= TARGET_MIN_BYTES && TARGET_BYTES <= TARGET_MAX_BYTES)) || die "Target eMMC capacity is outside the supported 32 GB Desk Box range."
     TARGET_NAME=$(cat "${target_sysfs}/device/name" 2>/dev/null || true)
     TARGET_CID=$(cat "${target_sysfs}/device/cid" 2>/dev/null || true)
@@ -376,7 +382,7 @@ preflight() {
 
     local source_used source_boot_used target_root_capacity target_boot_capacity backup_avail
     source_used=$(df -B1 --output=used / | tail -n 1 | tr -d ' ')
-    target_root_capacity=$(((TARGET_LAST_USABLE - ROOT_START + 1) * SECTOR_SIZE))
+    target_root_capacity=$((TARGET_ROOT_SECTORS * SECTOR_SIZE))
     ((source_used + 536870912 < target_root_capacity)) || die "The running root filesystem will not fit on eMMC with the required safety margin."
     source_boot_used=$(df -B1 --output=used /boot | tail -n 1 | tr -d ' ')
     target_boot_capacity=$((BOOT_SECTORS * SECTOR_SIZE))
@@ -404,7 +410,7 @@ preflight() {
 
 verify_partition_geometry() {
     local boot_parent root_parent boot_start boot_size root_start root_size
-    local expected_root_size boot_type root_type
+    local boot_type root_type
     boot_parent=$(lsblk -nro PKNAME "${TARGET_BOOT}" | head -n 1)
     root_parent=$(lsblk -nro PKNAME "${TARGET_ROOT}" | head -n 1)
     [[ "${boot_parent}" == "${TARGET_DISK##*/}" && "${root_parent}" == "${TARGET_DISK##*/}" ]] || die "New partitions do not belong to ${TARGET_DISK}."
@@ -413,9 +419,8 @@ verify_partition_geometry() {
     boot_size=$(blockdev --getsz "${TARGET_BOOT}")
     root_start=$(lsblk -bndo START "${TARGET_ROOT}")
     root_size=$(blockdev --getsz "${TARGET_ROOT}")
-    expected_root_size=$((TARGET_LAST_USABLE - ROOT_START + 1))
     [[ "${boot_start}" == "${BOOT_START}" && "${boot_size}" == "${BOOT_SECTORS}" ]] || die "New BOOT partition geometry is incorrect."
-    [[ "${root_start}" == "${ROOT_START}" && "${root_size}" == "${expected_root_size}" ]] || die "New ROOTFS partition geometry is incorrect."
+    [[ "${root_start}" == "${ROOT_START}" && "${root_size}" == "${TARGET_ROOT_SECTORS}" ]] || die "New ROOTFS partition geometry is incorrect."
 
     boot_type=$(lsblk -nro PARTTYPE "${TARGET_BOOT}" | tr '[:lower:]' '[:upper:]')
     root_type=$(lsblk -nro PARTTYPE "${TARGET_ROOT}" | tr '[:lower:]' '[:upper:]')
@@ -426,7 +431,7 @@ verify_partition_geometry() {
 print_plan() {
     local target_mib root_end
     target_mib=$((TARGET_BYTES / 1024 / 1024))
-    root_end=${TARGET_LAST_USABLE}
+    root_end=${TARGET_ROOT_END}
     cat <<EOF
 
 Desk Box SD -> eMMC plan
@@ -446,6 +451,7 @@ Exact target write layout (512-byte sectors):
   BOOT ext4:          sectors 32768-1079295 (${BOOT_SECTORS} sectors)
   alignment gap:      sectors 1079296-1081343
   ROOTFS ext4:        sectors 1081344-${root_end}
+  GPT alignment gap:  sectors $((TARGET_ROOT_END + 1))-${TARGET_LAST_USABLE}
   GPT backup:         final 33 sectors (managed by GPT)
 
 Installer actions:
@@ -541,7 +547,7 @@ label: gpt
 unit: sectors
 
 ${TARGET_BOOT} : start=${BOOT_START}, size=${BOOT_SECTORS}, type=${LINUX_GPT_TYPE}, name="BOOT"
-${TARGET_ROOT} : start=${ROOT_START}, type=${LINUX_GPT_TYPE}, name="ROOTFS"
+${TARGET_ROOT} : start=${ROOT_START}, size=${TARGET_ROOT_SECTORS}, type=${LINUX_GPT_TYPE}, name="ROOTFS"
 EOF
     sfdisk --verify "${TARGET_DISK}"
     partprobe "${TARGET_DISK}"
