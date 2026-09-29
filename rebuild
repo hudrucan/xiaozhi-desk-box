@@ -851,6 +851,15 @@ copy_files() {
     # Copy the full Armbian image
     cp -af ${tmp_armbian}/. ${tag_rootfs}
 
+    if [[ "${board}" == "deskbox" ]]; then
+        # The upstream base image may carry these as dangling symlinks after
+        # extraction. GNU cp refuses to replace a dangling destination
+        # symlink, so remove only the two pinned Desk Box regulatory files
+        # before overlaying the repository-owned regular files below.
+        rm -f "${tag_rootfs}/usr/lib/firmware/regulatory.db" \
+            "${tag_rootfs}/usr/lib/firmware/regulatory.db.p7s"
+    fi
+
     # Copy the common files
     [[ -d "${common_files}" ]] && cp -af --no-preserve=ownership ${common_files}/. ${tag_rootfs}
 
