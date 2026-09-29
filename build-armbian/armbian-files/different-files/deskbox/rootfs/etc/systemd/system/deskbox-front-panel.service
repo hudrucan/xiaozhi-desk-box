@@ -1,6 +1,7 @@
 [Unit]
 Description=Desk Box FD6551 front-panel clock
-After=systemd-modules-load.service
+Wants=chrony.service deskbox-front-panel-early.service
+After=chrony.service deskbox-front-panel-early.service
 
 [Service]
 Type=simple

@@ -179,10 +179,13 @@ SDIO functions bind. The service uses the hardware-validated H4 transport at
 1.5 Mbps; it does not toggle unverified GPIOs. See
 [`PACKAGES.md`](build-armbian/armbian-files/different-files/deskbox/PACKAGES.md).
 
-The hardware-validated front-panel service displays local `HH:MM`, blinks the
-colon and reflects Wi-Fi, LAN and external USB state. Clock/alarm, play and
-pause remain unused. The service bit-bangs the seller-proven FD6551 protocol on
-GPIO4_A2/A3 and requires no DTB change. See
+The hardware-validated front-panel service shows `----` during early boot,
+switches to local `HH:MM` only after chrony reports a valid NTP reference,
+blinks the colon and reflects Wi-Fi, LAN and external USB state. Time validity
+is latched after the first synchronization, so a later network loss does not
+blank the clock. Clock/alarm, play and pause remain unused. The service
+bit-bangs the seller-proven FD6551 protocol on GPIO4_A2/A3 and requires no DTB
+change. See
 [`PANEL.md`](build-armbian/armbian-files/different-files/deskbox/PANEL.md).
 
 ## Repository map

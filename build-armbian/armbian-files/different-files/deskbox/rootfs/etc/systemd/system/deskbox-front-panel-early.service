@@ -1,0 +1,14 @@
+[Unit]
+Description=Desk Box early front-panel placeholder
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=sysinit.target chrony.service deskbox-front-panel.service
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/deskbox-front-panel --placeholder
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

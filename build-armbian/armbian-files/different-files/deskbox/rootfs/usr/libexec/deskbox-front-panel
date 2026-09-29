@@ -5,6 +5,8 @@ import fcntl
 import glob
 import os
 import signal
+import subprocess
+import sys
 import time
 from datetime import datetime
 
@@ -18,6 +20,7 @@ MODE_ADDR = 0x48
 ICON_ADDR = 0x66
 DIGIT_ADDRS = (0x68, 0x6A, 0x6C, 0x6E)
 HALF_CLOCK = 0.000005
+TIME_QUERY_INTERVAL = 5.0
 GPIO_FDS = {}
 
 DIGITS = {
@@ -41,6 +44,7 @@ ICON_PLAY = 0x08
 ICON_COLON = 0x10
 ICON_LAN = 0x20
 ICON_WIFI = 0x40
+DASH = 0x40
 
 
 def write_text(path, value):
@@ -153,8 +157,41 @@ def external_usb_present():
     return False
 
 
-def connectivity_icons(now):
-    mask = ICON_COLON if now.second % 2 == 0 else 0
+def time_is_trustworthy():
+    try:
+        result = subprocess.run(
+            ["/usr/bin/chronyc", "tracking"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+
+    fields = {}
+    for line in result.stdout.splitlines():
+        if ":" in line:
+            name, value = line.split(":", 1)
+            fields[name.strip()] = value.strip()
+
+    try:
+        stratum = int(fields.get("Stratum", "0"))
+    except ValueError:
+        return False
+    reference = fields.get("Reference ID", "").split(maxsplit=1)[0]
+    return (
+        stratum > 0
+        and reference not in {"", "00000000", "0.0.0.0"}
+        and fields.get("Leap status") == "Normal"
+    )
+
+
+def connectivity_icons(now, trusted_time):
+    mask = ICON_COLON if trusted_time and now.second % 2 == 0 else 0
     if carrier("wlan0"):
         mask |= ICON_WIFI
     if carrier("end0"):
@@ -167,6 +204,9 @@ def connectivity_icons(now):
 def main():
     if os.geteuid() != 0:
         raise SystemExit("deskbox-front-panel must run as root")
+    if len(sys.argv) > 2 or (len(sys.argv) == 2 and sys.argv[1] != "--placeholder"):
+        raise SystemExit("usage: deskbox-front-panel [--placeholder]")
+    placeholder_only = len(sys.argv) == 2
 
     stopping = False
 
@@ -180,18 +220,34 @@ def main():
     with open(LOCK_PATH, "w", encoding="ascii") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         initialize()
-        previous_digits = None
+        if placeholder_only:
+            for address in DIGIT_ADDRS:
+                write_register(address, DASH)
+            write_register(ICON_ADDR, 0)
+            return
+
+        trusted_time = False
+        next_time_query = 0.0
+        previous_segments = None
         previous_icons = None
 
         while not stopping:
-            now = datetime.now()
-            digits = f"{now.hour:02d}{now.minute:02d}"
-            icons = connectivity_icons(now)
+            monotonic_now = time.monotonic()
+            if not trusted_time and monotonic_now >= next_time_query:
+                trusted_time = time_is_trustworthy()
+                next_time_query = monotonic_now + TIME_QUERY_INTERVAL
 
-            if digits != previous_digits:
-                for address, character in zip(DIGIT_ADDRS, digits):
-                    write_register(address, DIGITS[character])
-                previous_digits = digits
+            now = datetime.now()
+            if trusted_time:
+                segments = tuple(DIGITS[value] for value in f"{now.hour:02d}{now.minute:02d}")
+            else:
+                segments = (DASH,) * len(DIGIT_ADDRS)
+            icons = connectivity_icons(now, trusted_time)
+
+            if segments != previous_segments:
+                for address, value in zip(DIGIT_ADDRS, segments):
+                    write_register(address, value)
+                previous_segments = segments
             if icons != previous_icons:
                 write_register(ICON_ADDR, icons)
                 previous_icons = icons

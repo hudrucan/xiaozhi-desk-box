@@ -56,6 +56,27 @@ The complete hardware-verified icon bitmap at address `0x66` is:
 Play and pause are reversed relative to the common default ordering documented
 by `linux_openvfd`; the table above records the observed Desk Box hardware.
 
+## Boot and time validity
+
+`deskbox-front-panel-early.service` runs before `sysinit.target` and writes
+`----` as soon as the root filesystem has been remounted. The persistent
+`deskbox-front-panel.service` is ordered after both that oneshot and
+`chrony.service`, so the two processes never drive the panel concurrently.
+
+The Desk Box exposes no RTC device. `fake-hwclock` restores only the last saved
+timestamp and cannot account for time spent powered off, so it is not accepted
+as authoritative. The clock changes from `----` to `HH:MM` only after
+`chronyc tracking` reports all of the following in the current boot:
+
+- a non-zero stratum;
+- a non-zero reference ID;
+- `Leap status: Normal`.
+
+Once those conditions pass, validity is latched for the lifetime of the panel
+service. Losing the network later does not blank a clock that was already
+synchronized. Until then the colon stays off, while Wi-Fi, LAN and USB icons
+continue to reflect their normal inputs.
+
 ## Validation
 
 The following passed on the reference box:
