@@ -28,8 +28,7 @@
 # init_var           : Initialize all variables
 # check_data         : Validate the configuration data
 # find_armbian       : Find Armbian file (build/output/images/*.img)
-# git_pull_dir       : Download files from a git repository
-# download_depends   : Download the dependency files
+# download_depends   : Validate repository-pinned dependencies
 # query_kernel       : Query the latest kernel version
 # check_kernel       : Verify kernel file integrity via sha256sum
 # download_kernel    : Download the kernel files
@@ -76,11 +75,6 @@ armbian_release_file="etc/armbian-release"
 board_release_file="etc/armbian-board-release.conf"
 # Add custom armbian information
 ophub_release_file="etc/ophub-release"
-
-# U-BOOT files download repository
-uboot_repo="https://github.com/ophub/u-boot"
-# Firmware files download repository
-firmware_repo="https://github.com/ophub/firmware"
 
 # Set the kernel download repository from github.com
 kernel_repo="https://github.com/ophub/kernel"
@@ -435,83 +429,30 @@ find_armbian() {
     echo -e "${INFO} Armbian rebuild file: [ ${armbian_rebuild_name} ], Version: [ ${armbian_rebuild_version} ]"
 }
 
-git_pull_dir() {
-    cd "${current_path}"
-
-    # Check git_pull_dir parameters
-    git_repo="${1}"
-    git_branch="${2}"
-    git_dir="${3}"
-    git_path="${4}"
-    [[ -n "${git_repo}" && -n "${git_branch}" && -n "${git_dir}" && -n "${git_path}" ]] || {
-        error_msg "git_pull_dir parameter is missing: [ ${git_repo}, ${git_branch}, ${git_dir}, ${git_path} ]"
-    }
-
-    # Clone the repository to the temporary directory. If it fails, wait 1 minute and try again, try 10 times.
-    git_tmp_path="$(mktemp -d)"
-    local clone_ok=0
-    for i in {1..10}; do
-        if git clone --quiet --single-branch --depth=1 --branch="${git_branch}" "${git_repo}" "${git_tmp_path}"; then
-            clone_ok=1
-            break
-        fi
-        sleep 60
-    done
-    [[ "${clone_ok}" -eq 1 ]] || error_msg "Failed to clone the [ ${git_repo} ] repository."
-
-    # Copy the files to the storage directory
-    mkdir -p "${git_path}"
-    cp -af --update=none --no-preserve=ownership "${git_tmp_path}/${git_dir}/." "${git_path}" ||
-        error_msg "Failed to move the [ ${git_dir} ] files to the [ ${git_path} ] directory."
-
-    # Delete temporary files
-    rm -rf "${git_tmp_path}" 2>/dev/null
-}
-
 download_depends() {
-    echo -e "${STEPS} Downloading dependency files..."
+    echo -e "${STEPS} Validating Desk Box dependency files..."
 
-    # Desk Box carries its verified board bootloader and AIC8800D80 firmware in
-    # this repository. Avoid importing the generic u-boot and firmware trees.
-    if [[ "${#build_armbian[@]}" -eq 1 && "${build_armbian[0]}" == "deskbox" ]]; then
-        deskbox_bootloader="${different_files}/deskbox/u-boot/bootloader.bin"
-        deskbox_firmware="${firmware_path}/aic8800_sdio"
-        deskbox_firmware_files=(
-            aic_userconfig_8800d80.txt
-            fmacfw_8800d80_u02.bin
-            fmacfwbt_8800d80_u02.bin
-            fw_adid_8800d80_u02.bin
-            fw_patch_8800d80_u02.bin
-            fw_patch_table_8800d80_u02.bin
-            lmacfw_rf_8800d80_u02.bin
-        )
+    [[ "${#build_armbian[@]}" -eq 1 && "${build_armbian[0]}" == "deskbox" ]] ||
+        error_msg "This fork supports only the [ deskbox ] target."
 
-        [[ -s "${deskbox_bootloader}" ]] || error_msg "Missing Desk Box bootloader: [ ${deskbox_bootloader} ]"
-        for firmware_file in "${deskbox_firmware_files[@]}"; do
-            [[ -s "${deskbox_firmware}/${firmware_file}" ]] ||
-                error_msg "Missing Desk Box firmware: [ ${deskbox_firmware}/${firmware_file} ]"
-        done
-        echo -e "${INFO} Using repository-pinned Desk Box bootloader and AIC8800D80 firmware."
-        return
-    fi
+    deskbox_bootloader="${different_files}/deskbox/u-boot/bootloader.bin"
+    deskbox_firmware="${firmware_path}/aic8800_sdio"
+    deskbox_firmware_files=(
+        aic_userconfig_8800d80.txt
+        fmacfw_8800d80_u02.bin
+        fmacfwbt_8800d80_u02.bin
+        fw_adid_8800d80_u02.bin
+        fw_patch_8800d80_u02.bin
+        fw_patch_table_8800d80_u02.bin
+        lmacfw_rf_8800d80_u02.bin
+    )
 
-    # Download Armbian u-boot files
-    uboot_num="$(find "${uboot_path}/rockchip" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
-    if [[ -n "${uboot_num}" && "${uboot_num}" -le "5" ]]; then
-        git_pull_dir "${uboot_repo}" main u-boot "${uboot_path}"
-        echo -e "${INFO} u-boot download completed."
-    else
-        echo -e "${INFO} u-boot files exist, skip downloading."
-    fi
-
-    # Download Armbian firmware files
-    firmware_num="$(find "${firmware_path}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
-    if [[ -n "${firmware_num}" && "${firmware_num}" -le "5" ]]; then
-        git_pull_dir "${firmware_repo}" main firmware "${firmware_path}"
-        echo -e "${INFO} firmware download completed."
-    else
-        echo -e "${INFO} firmware files exist, skip downloading."
-    fi
+    [[ -s "${deskbox_bootloader}" ]] || error_msg "Missing Desk Box bootloader: [ ${deskbox_bootloader} ]"
+    for firmware_file in "${deskbox_firmware_files[@]}"; do
+        [[ -s "${deskbox_firmware}/${firmware_file}" ]] ||
+            error_msg "Missing Desk Box firmware: [ ${deskbox_firmware}/${firmware_file} ]"
+    done
+    echo -e "${INFO} Repository-pinned bootloader and AIC8800D80 firmware are complete."
 }
 
 query_kernel() {
@@ -1279,41 +1220,6 @@ refactor_rootfs() {
         grep -q "SSH_CLIENT" "${osc_file}" || sed -i '/\[ "${TERM:-dumb}" = "dumb" \]/a [[ -n "${SSH_CLIENT}" || -n "${SSH_TTY}" ]] && return 0' "${osc_file}"
     }
 
-    # Get random macaddr
-    mac_hexchars="0123456789ABCDEF"
-    mac_end=$(for i in {1..6}; do echo -n ${mac_hexchars:$((${RANDOM} % 16)):1}; done | sed -e 's/\(..\)/:\1/g')
-    random_macaddr="9E:61${mac_end}"
-
-    # Optimize wifi/bluetooth module
-    [[ "${board}" != "deskbox" && -d "usr/lib/firmware/brcm" ]] && (
-        cd usr/lib/firmware/brcm/ && rm -f ../*.hcd
-
-        # gtking/gtking pro is bcm4356 wifi/bluetooth, wifi5 module AP6356S
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:00/" "brcmfmac4356-sdio.txt" >"brcmfmac4356-sdio.azw,gtking.txt"
-        # gtking/gtking pro is bcm4356 wifi/bluetooth, wifi6 module AP6275S
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:01/" "brcmfmac4375-sdio.txt" >"brcmfmac4375-sdio.azw,gtking.txt"
-        # MXQ Pro+ is AP6330(bcm4330) wifi/bluetooth
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:02/" "brcmfmac4330-sdio.txt" >"brcmfmac4330-sdio.crocon,mxq-pro-plus.txt"
-        # HK1 Box & H96 Max X3 is bcm54339 wifi/bluetooth
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:03/" "brcmfmac4339-sdio.ZP.txt" >"brcmfmac4339-sdio.amlogic,sm1.txt"
-        # new ugoos x3 is brm43456
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:04/" "brcmfmac43456-sdio.txt" >"brcmfmac43456-sdio.amlogic,sm1.txt"
-        # x96max plus v5.1 (ip1001m phy) adopts am7256 (brcm4354)
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:05/" "brcmfmac4354-sdio.txt" >"brcmfmac4354-sdio.amlogic,sm1.txt"
-        # panther x2 AP6212A
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:06/" "brcmfmac43430-sdio.txt" >"brcmfmac43430-sdio.panther,x2.txt"
-        # ct2000 s922x is brm4359
-        sed -i "s/macaddr=.*/macaddr=${random_macaddr}:07/" "brcmfmac4359-sdio.ali,ct2000.txt"
-        # easepi-r2 is AP6256 (BCM43455) wifi/bluetooth
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:08/" "brcmfmac43455-sdio.txt" >"brcmfmac43455-sdio.linkease,easepi-r2.txt"
-        ln -sf brcmfmac43455-sdio.bin brcmfmac43455-sdio.linkease,easepi-r2.bin
-        ln -sf brcmfmac43455-sdio.clm_blob brcmfmac43455-sdio.linkease,easepi-r2.clm_blob
-        # easepi-a2 is AP6255 (BCM43455) wifi/bluetooth
-        sed -e "s/macaddr=.*/macaddr=${random_macaddr}:09/" "brcmfmac43455-sdio.txt" >"brcmfmac43455-sdio.easepi,a2.txt"
-        ln -sf brcmfmac43455-sdio.bin brcmfmac43455-sdio.easepi,a2.bin
-        ln -sf brcmfmac43455-sdio.clm_blob brcmfmac43455-sdio.easepi,a2.clm_blob
-    )
-
     if [[ "${board}" == "deskbox" ]]; then
         # Keep only the repository-pinned AIC8800D80 firmware set. This also
         # removes generic firmware inherited from the upstream base image.
@@ -1324,6 +1230,7 @@ refactor_rootfs() {
         rm -f etc/custom_service/start_service.sh
         rmdir etc/custom_service 2>/dev/null || true
         rm -f etc/balance_irq etc/modules-load.d/ophub-load-list.conf usr/sbin/balethirq.pl
+        rm -f usr/sbin/armbian-kernel
         [[ -f etc/rc.local ]] && sed -i '\|/etc/custom_service/start_service.sh|d' etc/rc.local
 
         # Remove build-time package metadata and caches from the final image.

@@ -1,81 +1,181 @@
-# Desk Box Armbian
+<div align="center">
+  <img src="docs/images/desk-box.svg" alt="Desk Box" width="112" height="112">
 
-This fork rebuilds one target only: `deskbox`, an RK3528 TV box with 4 GB RAM,
-32 GB eMMC and AIC8800D80 SDIO Wi-Fi.
+# Xiaozhi Desk Box Armbian
 
-## Target identity
+**A focused Bookworm image for one RK3528 Desk Box.**
 
-- Board/profile: `deskbox`
-- Runtime board: `Deskbox`
-- Runtime model: `RK.Deskbox`
-- Kernel family: `rk35xx/6.1.y`
-- Active DTB: `rockchip/rk3528-deskbox.dtb`
-- Device-tree model: `Rockchip RK3528 Desk Box`
-- Default timezone: `Asia/Ho_Chi_Minh`
-- Default wireless regulatory domain: `VN`
+[![Image](https://img.shields.io/badge/image-audited-2ea44f?style=flat-square)](https://github.com/hudrucan/xiaozhi-desk-box/releases/latest)
+[![Target](https://img.shields.io/badge/target-RK3528-17120d?style=flat-square)](#hardware)
+[![Kernel](https://img.shields.io/badge/kernel-6.1.157--rk35xx-f0c779?style=flat-square)](#current-scope)
+[![License](https://img.shields.io/badge/license-GPL--2.0-blue?style=flat-square)](LICENSE)
 
-The DTB's source-compatible strings remain unchanged from the known-good input:
-`rockchip,rk3528-box` and `rockchip,rk3528`. The validated bootloader applies
-the same runtime SoC fixup seen on the reference device, where Linux reports
-`rockchip,rk3528a` as the second compatible string.
+[Download](https://github.com/hudrucan/xiaozhi-desk-box/releases/latest) · [Build](#build) · [Boot chain](#validated-boot-chain) · [Companion projects](#companion-projects)
+</div>
+
+---
+
+This is a single-board fork of
+[`ophub/amlogic-s9xxx-armbian`](https://github.com/ophub/amlogic-s9xxx-armbian).
+It turns a pinned upstream Armbian server image into a runtime-clean Desk Box
+image while keeping the hardware payloads that were verified on the reference
+device.
+
+## Highlights
+
+| | |
+|---|---|
+| 🎯 **One target** | Only the `deskbox` board profile is exposed. |
+| 🔒 **Pinned inputs** | Base image, rk35xx kernel bundle, DTB, bootloader and Wi-Fi firmware are checksum-verified. |
+| 🧹 **Focused image** | One DTB, one AIC8800D80 firmware set, no kernel headers, generic startup hooks or package caches. |
+| 🔍 **Release audit** | Every published image is mounted read-only and checked before upload. |
+| 🧱 **Known-good boot chain** | Factory-compatible DDR/SPL is paired with the validated RK3528 U-Boot/FIT/ATF payload. |
+
+## Current scope
+
+| Component | Value |
+|---|---|
+| Board profile | `deskbox` |
+| Runtime model | `RK.Deskbox` |
+| Distribution | Debian Bookworm, arm64 server |
+| Kernel | `6.1.157-rk35xx-ophub` |
+| Active DTB | `rockchip/rk3528-deskbox.dtb` |
+| Device-tree model | `Rockchip RK3528 Desk Box` |
+| Wi-Fi | AIC8800D80 over SDIO |
+| Timezone / regulatory domain | `Asia/Ho_Chi_Minh` / `VN` |
+
+The project intentionally does not build a kernel or U-Boot. It assembles a
+tested image from pinned release artifacts and the board-specific payloads
+stored in this repository.
+
+## Hardware
+
+The reference Desk Box uses:
+
+- Rockchip RK3528;
+- 4 GB Micron DDR3 and 32 GB eMMC;
+- AIC8800D80 SDIO Wi-Fi;
+- Ethernet and removable microSD storage.
+
+The functional baseline for this profile was boot-tested from microSD with
+Ethernet, SSH, multi-user systemd startup and AIC8800D80 Wi-Fi operational.
+Each newly published image still requires a hardware boot test. Installing to
+eMMC is outside this repository's automated test scope.
+
+## Download and first boot
+
+Download the `desk-box-rk3528-6.1.157-r*-a*.img.gz` asset and its `.sha256`
+file from the
+[latest release](https://github.com/hudrucan/xiaozhi-desk-box/releases/latest),
+verify the checksum, then flash the compressed image with Balena Etcher or an
+equivalent raw-image writer.
+
+The debug image intentionally retains `root` / `1234` for bring-up and agent
+access. Change the password before connecting the box to an untrusted network.
+The legacy `/boot/armbian_first_run.txt` template is not included because the
+current Armbian first-login path does not consume it.
 
 ## Build
 
-Run the **Build Desk Box image** workflow from the Actions page. Its defaults
-rebuild the pinned Bookworm arm64 server image with kernel `6.1.157` and publish
-the resulting image plus SHA256 file to the release tag
-`desk-box-rk3528-6.1.157`.
+The supported build path is
+[`Build Desk Box Image`](https://github.com/hudrucan/xiaozhi-desk-box/actions/workflows/build-deskbox.yml)
+on GitHub Actions. Its defaults point to the tested Bookworm base and rk35xx
+kernel release; both downloads are rejected if their SHA256 values differ.
 
-Local rebuilds require GNU/Linux x86_64 or a compatible GitHub Actions runner:
+A local rebuild requires GNU/Linux x86_64, root privileges, loop devices and
+GNU userland tools:
 
 ```bash
 sudo ./rebuild -b deskbox -a false -k 6.1.157
 ```
 
-The macOS host is suitable for editing and DTB verification, but the image
-rebuild script depends on Linux loop devices, mounts and GNU userland tools.
+macOS is suitable for editing and device-tree verification, but not for running
+the image rebuild engine directly.
+
+## Image pipeline
+
+```mermaid
+flowchart LR
+    base["Pinned Bookworm base image"] --> rebuild["Desk Box rebuild"]
+    kernel["Pinned rk35xx kernel bundle"] --> rebuild
+    payloads["DTB + bootloader + AIC8800D80 firmware"] --> rebuild
+    rebuild --> image["desk-box-rk3528-6.1.157-rN-aN.img.gz"]
+    image --> audit["Read-only image audit"]
+    audit --> release["GitHub Release"]
+```
+
+The build does not clone generic U-Boot or firmware trees. Repository-pinned
+board dependencies must be present, and the workflow audits their hashes both
+before and after rebuilding the image.
+
+Each workflow attempt creates a new immutable release named
+`desk-box-rk3528-<kernel>-r<run>-a<attempt>`. Existing releases and assets are
+never edited or overwritten, so a previously tested image remains available for
+fallback.
 
 ## Validated boot chain
 
-The SD baseline was verified on the reference Desk Box:
+The microSD baseline was verified on the reference device:
 
-- factory-compatible DDR/SPL at sector 64;
+- factory-compatible DDR V1.05 and SPL v1.04 at sector 64;
 - U-Boot/FIT/ATF at sector 16384;
-- Linux `6.1.157-rk35xx-ophub`;
-- root and boot partitions mounted from SD;
-- AIC8800D80 firmware loaded and Wi-Fi connected;
-- Ethernet, SSH and systemd multi-user boot operational.
+- root and boot partitions mounted from microSD;
+- Linux `6.1.157-rk35xx-ophub` reached multi-user mode;
+- Ethernet, SSH and AIC8800D80 Wi-Fi worked.
 
-The build uses the verified bootloader and AIC8800D80 firmware stored in this
-fork. It does not clone generic U-Boot or firmware repositories. Kernel
-boot/modules and the base Armbian image remain pinned external release assets.
+The board bootloader keeps the factory-compatible DDR parameters required by
+the Micron DDR3 layout. See
+[`BOOTLOADER.md`](build-armbian/armbian-files/different-files/deskbox/BOOTLOADER.md)
+for provenance, offsets and hashes.
 
-See
-[`build-armbian/armbian-files/different-files/deskbox/BOOTLOADER.md`](build-armbian/armbian-files/different-files/deskbox/BOOTLOADER.md)
-for the bootloader provenance and hashes, and
-[`build-armbian/armbian-files/different-files/deskbox/FIRMWARE.md`](build-armbian/armbian-files/different-files/deskbox/FIRMWARE.md)
-for the firmware allowlist, provenance and hashes.
+## Device tree and firmware
 
-## DTB source and safety
-
-`rk3528-deskbox.dts` is the canonical decompilation of the exact known-good
-DTB. The rebuilt DTB intentionally changes only:
+`rk3528-deskbox.dts` is the canonical decompilation of the known-good reference
+DTB. The compiled Desk Box DTB differs only in audited metadata:
 
 1. `/model`: `Rockchip RK3528 Generic TV Box` → `Rockchip RK3528 Desk Box`;
 2. `/wireless-wlan/wifi_chip_type`: `ap6275s` → `AIC8800D80`.
 
-The second change corrects the value returned by Rockchip's bound
-`wlan-platdata` driver. SDIO detection and firmware selection continue to be
-performed by the AIC8800 driver. GPIO, host-wake, pinctrl, pwrseq, controller
-configuration and frequencies are unchanged.
+GPIO, pinctrl, host-wake, pwrseq, controller configuration and bus frequencies
+are unchanged. The source-compatible strings remain `rockchip,rk3528-box` and
+`rockchip,rk3528`; the validated bootloader applies the runtime RK3528A fixup
+seen on the reference device.
 
-## First boot
+The seven AIC8800D80 firmware files are an explicit allowlist matching both the
+reference device and their documented upstream hashes. See
+[`FIRMWARE.md`](build-armbian/armbian-files/different-files/deskbox/FIRMWARE.md).
 
-The legacy `/boot/armbian_first_run.txt` template is not included because the
-current Armbian first-login implementation does not consume it. For headless
-setup, use wired Ethernet for the first login or prepare a current Armbian
-preset in `/root/.not_logged_in_yet` before imaging.
+## Repository map
 
-The debug image intentionally retains the current `root` / `1234` credentials
-for device access during bring-up. Change that password before exposing the
-device outside a trusted LAN.
+| Path | Purpose |
+|---|---|
+| `.github/workflows/build-deskbox.yml` | Pinned build, audit and release pipeline |
+| `action.yml` | Minimal single-target rebuild action |
+| `rebuild` | Shared upstream image transformation engine |
+| `build-armbian/armbian-files/different-files/deskbox/` | Desk Box rootfs overrides and bootloader |
+| `build-armbian/armbian-files/platform-files/rockchip/` | RK3528 boot configuration and canonical DTB/DTS |
+| `build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio/` | AIC8800D80 firmware allowlist |
+
+The `rebuild` engine retains generic platform mechanics inherited from upstream
+because they implement partitioning, rootfs conversion and boot assembly. The
+public profile and workflow remain Desk Box-only.
+
+## Companion projects
+
+- [`xiaozhi-desk-robot`](https://github.com/hudrucan/xiaozhi-desk-robot) — robot firmware and UI.
+- [`xiaozhi-desk-robot-server`](https://github.com/hudrucan/xiaozhi-desk-robot-server) — companion server stack.
+
+## Notes and limitations
+
+- A successful workflow proves image structure, hashes and filesystem policy;
+  final hardware behavior still requires a microSD boot test.
+- The image is a focused device target, not a general RK3528 distribution.
+- eMMC installation, flashing and rollback are intentionally not automated by
+  this repository.
+
+## Upstream and license
+
+This fork is derived from
+[`ophub/amlogic-s9xxx-armbian`](https://github.com/ophub/amlogic-s9xxx-armbian)
+and remains licensed under [GPL-2.0](LICENSE). Board payload provenance and
+checksums are documented beside the relevant files.

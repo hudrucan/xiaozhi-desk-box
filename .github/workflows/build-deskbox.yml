@@ -92,7 +92,7 @@ jobs:
           sudo rm -f /swapfile /mnt/swapfile
           sudo apt-get -y update
           sudo apt-get -y purge azure-cli 'ghc*' 'zulu*' 'llvm*' firefox 'google*' 'dotnet*' powershell 'openjdk*' 'mongodb*' 'moby*' || true
-          sudo apt-get -y install $(<compile-kernel/tools/script/ubuntu2404-build-armbian-depends)
+          sudo apt-get -y install $(<.github/build-dependencies.txt)
           sudo apt-get -y autoremove --purge
           sudo apt-get clean
           sudo timedatectl set-timezone "${TZ}"
@@ -162,16 +162,11 @@ jobs:
           rm -f "${kernel_archive}"
 
       - name: Rebuild Desk Box image
+        id: rebuild
         uses: ./
         with:
-          build_target: armbian
-          armbian_path: ${{ steps.source.outputs.path }}
-          armbian_board: deskbox
-          kernel_repo: ophub/kernel
-          kernel_usage: stable
-          armbian_kernel: ${{ inputs.kernel_version }}
-          auto_kernel: "false"
-          armbian_fstype: ext4
+          source_image: ${{ steps.source.outputs.path }}
+          kernel_version: ${{ inputs.kernel_version }}
           builder_name: hudrucan
 
       - name: Select and checksum Desk Box output
@@ -181,7 +176,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          output_directory="${PACKAGED_OUTPUTPATH}"
+          output_directory="${{ steps.rebuild.outputs.output_path }}"
           mapfile -t images < <(find "${output_directory}" -maxdepth 1 -type f \
             -name "Armbian_*_rockchip_deskbox_*_${KERNEL_VERSION}_server_*.img.gz" -print)
           if [[ "${#images[@]}" -ne 1 ]]; then
@@ -190,7 +185,8 @@ jobs:
             exit 1
           fi
 
-          compact_name="desk-box-rk3528-${KERNEL_VERSION}.img.gz"
+          build_id="r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
+          compact_name="desk-box-rk3528-${KERNEL_VERSION}-${build_id}.img.gz"
           image_path="${output_directory}/${compact_name}"
           mv -- "${images[0]}" "${image_path}"
           (
@@ -280,6 +276,7 @@ jobs:
           fi
           assert_absent "${root}/usr/share/armbian.bak"
           assert_absent "${root}/usr/lib/bak-nand-sata-install"
+          assert_absent "${root}/usr/sbin/armbian-kernel"
           if [[ -d "${root}/var/lib/apt/lists" ]] && find "${root}/var/lib/apt/lists" -type f -print -quit | grep -q .; then
             echo "APT package lists remain in final image" >&2
             exit 1
@@ -317,7 +314,6 @@ jobs:
       - name: Upload Desk Box image to this fork's Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: desk-box-rk3528-${{ inputs.kernel_version }}
           IMAGE_PATH: ${{ steps.output.outputs.image_path }}
           CHECKSUM_PATH: ${{ steps.output.outputs.checksum_path }}
           UPSTREAM_TAG: ${{ inputs.upstream_tag }}
@@ -325,19 +321,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          release_title="desk-box-rk3528-${{ inputs.kernel_version }}"
+          build_id="r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
+          release_tag="desk-box-rk3528-${{ inputs.kernel_version }}-${build_id}"
+          release_title="${release_tag}"
           release_notes="Target: deskbox. Base: ${UPSTREAM_REPOSITORY}@${UPSTREAM_TAG}/${UPSTREAM_IMAGE}. Source commit: ${GITHUB_SHA}."
-          if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release create "${RELEASE_TAG}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --title "${release_title}" \
-              --notes "${release_notes}"
-          else
-            gh release edit "${RELEASE_TAG}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --title "${release_title}" \
-              --notes "${release_notes}"
+          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Refusing to overwrite existing release: ${release_tag}" >&2
+            exit 1
           fi
-          gh release upload "${RELEASE_TAG}" "${IMAGE_PATH}" "${CHECKSUM_PATH}" \
+          gh release create "${release_tag}" "${IMAGE_PATH}" "${CHECKSUM_PATH}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --clobber
+            --title "${release_title}" \
+            --notes "${release_notes}"
