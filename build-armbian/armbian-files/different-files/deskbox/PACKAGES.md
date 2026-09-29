@@ -20,5 +20,12 @@ btattach -B /dev/ttyS2 -P h4 -S 1500000
 
 The DTB selects UART2_M0 (GPIO3_A0/A1 RX/TX, GPIO3_A3 CTS and GPIO3_A2 RTS).
 The pre-start helper waits for both AIC SDIO functions to bind before starting
-the transport; it does not drive reset or wake GPIOs. HCI Reset, BR/EDR + LE
-controller registration and a BlueZ scan were validated on the reference box.
+the transport; it does not drive reset or wake GPIOs. The final image removes
+inherited `/var/lib/systemd/rfkill` state. The transport service starts after
+`systemd-rfkill` and explicitly unblocks Bluetooth before `btattach`. Its
+post-start helper waits for `hci0` and the restore transaction to finish,
+removes only stale Bluetooth state, unblocks all Bluetooth rfkill nodes and
+verifies them before BlueZ starts. BlueZ `AutoEnable=true` then powers the
+registered controller. HCI Reset, BR/EDR + LE controller registration and a
+BlueZ scan were validated on the reference box, including a reboot with both
+Bluetooth persistence files deliberately set to blocked.

@@ -10,7 +10,7 @@
 [![Kernel](https://img.shields.io/badge/kernel-6.1.174--rk35xx-f0c779?style=flat-square)](#current-scope)
 [![License](https://img.shields.io/badge/license-GPL--2.0-blue?style=flat-square)](LICENSE)
 
-[Download](https://github.com/hudrucan/xiaozhi-desk-box/releases/latest) · [Build](#build) · [Boot chain](#validated-boot-chain) · [Companion projects](#companion-projects)
+[Download](https://github.com/hudrucan/xiaozhi-desk-box/releases/latest) · [Build](#build) · [Install to eMMC](#install-to-emmc) · [Boot chain](#validated-boot-chain) · [Companion projects](#companion-projects)
 </div>
 
 ---
@@ -30,6 +30,7 @@ device.
 | 🧹 **Focused image** | One DTB, one AIC8800D80 firmware set, no kernel headers, generic startup hooks, package caches or upstream self-update helpers. |
 | 🔍 **Release audit** | Every published image is mounted read-only and checked before upload. |
 | 🧱 **Known-good boot chain** | Factory-compatible DDR/SPL is paired with the validated RK3528 U-Boot/FIT/ATF payload. |
+| 💾 **Guarded eMMC install** | Desk Box-only installer defaults to dry-run, verifies both devices and requires an exact destructive confirmation. |
 
 ## Current scope
 
@@ -66,9 +67,12 @@ The functional baseline for this profile was boot-tested from microSD with
 Ethernet, SSH, multi-user systemd startup, AIC8800D80 Wi-Fi, Lima graphics,
 Bluetooth and the FD6551 front panel operational. Bluetooth HCI Reset, BR/EDR
 and LE controller discovery and a BlueZ scan were validated over UART2_M0 at
-1.5 Mbps with hardware flow control. Each newly published image still requires
-a hardware boot test. Installing to eMMC is outside this repository's
-automated test scope.
+1.5 Mbps with hardware flow control. The board service discards inherited
+build-host rfkill state and explicitly unblocks Bluetooth after
+`systemd-rfkill`, so boot does not require a manual `rfkill unblock`. Each newly
+published image still requires a hardware boot test. The eMMC installer is
+structurally audited during the build, but its destructive path still requires
+an explicit on-device test.
 
 ## Download and first boot
 
@@ -82,6 +86,46 @@ The debug image intentionally retains `root` / `1234` for bring-up and agent
 access. Change the password before connecting the box to an untrusted network.
 The legacy `/boot/armbian_first_run.txt` template is not included because the
 current Armbian first-login path does not consume it.
+
+## Install to eMMC
+
+> [!WARNING]
+> The installer permanently erases every existing filesystem and file on the
+> internal `/dev/mmcblk2`. It is only for the supported Desk Box profile. Boot
+> and fully test the image from SD before considering eMMC installation.
+
+1. Flash the release image to SD and boot the Desk Box from it.
+2. Verify networking, SSH, Wi-Fi, Bluetooth, Lima and the front panel from SD.
+3. Review the read-only plan:
+
+   ```bash
+   sudo deskbox-install-emmc --dry-run
+   ```
+
+4. Start installation and type the exact confirmation requested on screen:
+
+   ```bash
+   sudo deskbox-install-emmc --install
+   ```
+
+5. Let every copy, fsck and read-only verification finish. Do not remove the SD
+   during installation.
+6. Shut down, disconnect power, remove the SD and cold boot from eMMC.
+
+The installer always targets `/dev/mmcblk2`, preserves the audited factory
+IDB/SPL and working U-Boot/FIT from the repository artifact, creates clean BOOT
+and root filesystems, and updates UUID references automatically. BOOT is
+created with the exact block size, inode size and ext4 feature set of the
+known-good SD filesystem so the validated vendor U-Boot sees no filesystem
+feature delta. It does not copy seller vendor-storage or runtime state.
+
+If installation fails, the original SD remains the recovery medium. Reinsert
+or retain it, boot from SD, inspect the timestamped backup under
+`/root/deskbox-emmc-backups/`, rerun `--dry-run`, then retry the install after
+fixing the reported cause. The automatic backup covers boot and partition
+metadata, not the complete former seller filesystem. See
+[`EMMC_INSTALL.md`](build-armbian/armbian-files/different-files/deskbox/EMMC_INSTALL.md)
+for the exact sector layout, checks and recovery limits.
 
 ## Build
 
@@ -107,7 +151,7 @@ the image rebuild engine directly.
 flowchart LR
     base["Pinned Bookworm base image"] --> rebuild["Desk Box rebuild"]
     kernel["Pinned rk35xx kernel bundle"] --> rebuild
-    payloads["DTB + bootloader + AIC8800D80 firmware + BlueZ + front panel"] --> rebuild
+    payloads["DTB + bootloader + AIC8800D80 firmware + BlueZ + front panel + eMMC installer"] --> rebuild
     rebuild --> image["desk-box-rk3528-6.1.174-rN-aN.img.gz"]
     image --> audit["Read-only image audit"]
     audit --> release["GitHub Release"]
@@ -196,6 +240,7 @@ change. See
 | `action.yml` | Minimal single-target rebuild action |
 | `rebuild` | Shared upstream image transformation engine |
 | `build-armbian/armbian-files/different-files/deskbox/` | Desk Box rootfs overrides and bootloader |
+| `build-armbian/armbian-files/different-files/deskbox/EMMC_INSTALL.md` | eMMC write layout, safety checks and recovery path |
 | `build-armbian/armbian-files/platform-files/rockchip/` | RK3528 boot configuration and pinned known-good DTB |
 | `build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio/` | AIC8800D80 firmware allowlist |
 | `build-armbian/armbian-files/common-files/usr/lib/firmware/regulatory.db*` | Tested regulatory database and signature |
@@ -214,8 +259,8 @@ public profile and workflow remain Desk Box-only.
 - A successful workflow proves image structure, hashes and filesystem policy;
   final hardware behavior still requires a microSD boot test.
 - The image is a focused device target, not a general RK3528 distribution.
-- eMMC installation, flashing and rollback are intentionally not automated by
-  this repository.
+- eMMC installation is intentionally interactive and Desk Box-specific; the
+  destructive path cannot be validated by GitHub Actions.
 
 ## Upstream and license
 

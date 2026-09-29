@@ -1,0 +1,55 @@
+#!/bin/sh
+
+set -eu
+
+attempt=0
+while [ ! -d /sys/class/bluetooth/hci0 ]; do
+    attempt=$((attempt + 1))
+    if [ "${attempt}" -ge 30 ]; then
+        echo "Desk Box hci0 did not appear within 30 seconds." >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+# systemd-rfkill can restore an hci0-specific stale block after the platform
+# rfkill was already unblocked. Let that restore transaction finish, discard
+# only Bluetooth persistence, and then establish the Desk Box always-on state.
+attempt=0
+while :; do
+    rfkill_state=$(systemctl show --property=ActiveState --value systemd-rfkill.service)
+    case "${rfkill_state}" in
+        inactive|failed)
+            break
+            ;;
+    esac
+    attempt=$((attempt + 1))
+    if [ "${attempt}" -ge 30 ]; then
+        echo "systemd-rfkill did not become idle within 30 seconds." >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+rm -f /var/lib/systemd/rfkill/*:bluetooth
+/usr/sbin/rfkill unblock bluetooth
+
+attempt=0
+while [ "${attempt}" -lt 10 ]; do
+    bluetooth_nodes=0
+    blocked_nodes=0
+    for node in /sys/class/rfkill/rfkill*; do
+        [ -r "${node}/type" ] || continue
+        [ "$(cat "${node}/type")" = bluetooth ] || continue
+        bluetooth_nodes=$((bluetooth_nodes + 1))
+        [ "$(cat "${node}/soft")" = 0 ] || blocked_nodes=$((blocked_nodes + 1))
+    done
+    if [ "${bluetooth_nodes}" -ge 2 ] && [ "${blocked_nodes}" -eq 0 ]; then
+        exit 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+done
+
+echo "Desk Box Bluetooth remained soft-blocked after the final unblock." >&2
+exit 1

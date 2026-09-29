@@ -1,0 +1,841 @@
+#!/usr/bin/env bash
+# Install a hardware-tested Desk Box SD image to the internal eMMC.
+
+set -Eeuo pipefail
+export LC_ALL=C
+umask 077
+
+readonly PROGRAM="${0##*/}"
+readonly TARGET_DISK="/dev/mmcblk2"
+readonly TARGET_BOOT="/dev/mmcblk2p1"
+readonly TARGET_ROOT="/dev/mmcblk2p2"
+readonly BOOTLOADER="/usr/lib/u-boot/bootloader.bin"
+readonly BACKUP_ROOT="/root/deskbox-emmc-backups"
+readonly LOCK_FILE="/run/lock/deskbox-install-emmc.lock"
+
+readonly SECTOR_SIZE=512
+readonly BACKUP_PREFIX_SECTORS=65536
+readonly IDB_START=64
+readonly IDB_SECTORS=16320
+readonly FACTORY_IDB_SECTORS=5120
+readonly VENDOR_STORAGE_START=7168
+readonly VENDOR_STORAGE_SECTORS=128
+readonly UBOOT_START=16384
+readonly UBOOT_SECTORS=16384
+readonly BOOT_START=32768
+readonly BOOT_SECTORS=1046528
+readonly ROOT_START=1081344
+readonly TAIL_BACKUP_SECTORS=8192
+readonly LINUX_GPT_TYPE="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+readonly TARGET_MIN_BYTES=$((28 * 1024 * 1024 * 1024))
+readonly TARGET_MAX_BYTES=$((32 * 1024 * 1024 * 1024))
+
+readonly BOOTLOADER_SIZE=16777216
+readonly BOOTLOADER_SHA256="f00a2e0b48fd29504292fc46007a505efe275f91b8b1863d499e6c141fc54eb8"
+readonly FACTORY_IDB_SHA256="a652135b8f9c00997a6739bd5356cb5758cee539b40fc88fb2f5b844891a9b16"
+readonly IDB_AREA_SHA256="50533be4f13708af21f74693f2240fc0e5867f045d0d143249654abc3fb0eb44"
+readonly UBOOT_AREA_SHA256="2bef85bc03009c53078c310fd4447cd24bccbb2c2b5fd2e5bff74aa618ec17c1"
+readonly ZERO_VENDOR_STORAGE_SHA256="de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31"
+readonly DTB_SHA256="041e0471ea06401e6af663d026913b0fa5cdbcc825b1eac7fbebfe96dc52da74"
+readonly BOOT_EXT4_FEATURES="64bit dir_index dir_nlink ext_attr extent extra_isize filetype flex_bg has_journal huge_file large_file metadata_csum resize_inode sparse_super"
+readonly BOOT_EXT4_FEATURES_MKFS="none,has_journal,ext_attr,resize_inode,dir_index,filetype,extent,64bit,flex_bg,sparse_super,large_file,huge_file,dir_nlink,extra_isize,metadata_csum"
+readonly BOOT_EXT4_BLOCK_SIZE=4096
+readonly BOOT_EXT4_INODE_SIZE=256
+readonly BOOT_EXT4_BYTES_PER_INODE=4096
+readonly BOOT_EXT4_BLOCK_COUNT=130816
+readonly BOOT_EXT4_INODE_COUNT=130816
+
+MODE="dry-run"
+SOURCE_ROOT=""
+SOURCE_BOOT=""
+SOURCE_DISK=""
+SOURCE_ROOT_UUID=""
+SOURCE_BOOT_UUID=""
+SOURCE_ROOT_FSTAB_OPTIONS=""
+SOURCE_ROOT_FSTAB_DUMP=""
+SOURCE_ROOT_FSTAB_PASS=""
+SOURCE_BOOT_FSTAB_OPTIONS=""
+SOURCE_BOOT_FSTAB_DUMP=""
+SOURCE_BOOT_FSTAB_PASS=""
+TARGET_SECTORS=0
+TARGET_BYTES=0
+TARGET_LAST_USABLE=0
+TARGET_NAME=""
+TARGET_CID=""
+BACKUP_DIR=""
+WORK_DIR=""
+TARGET_ROOT_MOUNT=""
+TARGET_BOOT_MOUNT=""
+DESTRUCTIVE_STARTED=0
+
+log() {
+    printf '[%s] %s\n' "${PROGRAM}" "$*" >&2
+}
+
+warn() {
+    printf '[%s] WARNING: %s\n' "${PROGRAM}" "$*" >&2
+}
+
+recovery_notice() {
+    ((DESTRUCTIVE_STARTED)) || return 0
+    warn "The SD source is unchanged. Keep it inserted and boot from SD for recovery."
+    [[ -n "${BACKUP_DIR}" ]] && warn "Boot/metadata backup: ${BACKUP_DIR}"
+    warn "Fix the reported problem, rerun --dry-run, then rerun --install."
+}
+
+die() {
+    printf '[%s] ERROR: %s\n' "${PROGRAM}" "$*" >&2
+    recovery_notice
+    exit 1
+}
+
+usage() {
+    cat <<EOF
+Usage: sudo ${PROGRAM} [--dry-run | --install]
+
+Desk Box-only SD to eMMC installer.
+
+  --dry-run  Run every read-only preflight check and print the exact write plan.
+             This is the default when no mode is supplied.
+  --install  Repeat preflight, create a boot/metadata backup, require an explicit
+             confirmation, erase ${TARGET_DISK}, and install the running SD image.
+  --help     Show this help.
+
+The command accepts no target-device override and no non-interactive yes option.
+It only supports a verified Desk Box image booted from SD with the internal eMMC
+at ${TARGET_DISK}. ALL EXISTING CONTENTS OF THE eMMC ARE ERASED by --install.
+EOF
+}
+
+parse_args() {
+    local seen_mode=0
+    while (($#)); do
+        case "$1" in
+            --dry-run)
+                ((seen_mode == 0)) || die "Specify only one mode."
+                MODE="dry-run"
+                seen_mode=1
+                ;;
+            --install)
+                ((seen_mode == 0)) || die "Specify only one mode."
+                MODE="install"
+                seen_mode=1
+                ;;
+            --help|-h)
+                usage
+                exit 0
+                ;;
+            *)
+                die "Unknown argument: $1 (see --help)."
+                ;;
+        esac
+        shift
+    done
+}
+
+cleanup() {
+    local mounts_busy=0
+    set +e
+    if [[ -n "${TARGET_BOOT_MOUNT}" ]] && mountpoint -q "${TARGET_BOOT_MOUNT}"; then
+        umount "${TARGET_BOOT_MOUNT}"
+        if mountpoint -q "${TARGET_BOOT_MOUNT}"; then
+            warn "Leaving busy target BOOT mount untouched at ${TARGET_BOOT_MOUNT}."
+            mounts_busy=1
+        fi
+    fi
+    if [[ -n "${TARGET_ROOT_MOUNT}" ]] && mountpoint -q "${TARGET_ROOT_MOUNT}"; then
+        umount "${TARGET_ROOT_MOUNT}"
+        if mountpoint -q "${TARGET_ROOT_MOUNT}"; then
+            warn "Leaving busy target ROOTFS mount untouched at ${TARGET_ROOT_MOUNT}."
+            mounts_busy=1
+        fi
+    fi
+    if ((mounts_busy == 0)) && [[ -n "${WORK_DIR}" && "${WORK_DIR}" == /mnt/deskbox-emmc.* && -d "${WORK_DIR}" ]]; then
+        rm -rf -- "${WORK_DIR}"
+    fi
+}
+
+on_signal() {
+    local name=$1 status=$2
+    trap - INT TERM
+    warn "Received ${name}; stopping and unmounting the target."
+    recovery_notice
+    exit "${status}"
+}
+
+on_error() {
+    local status=$? line=$1
+    trap - ERR
+    warn "Stopped at line ${line} with status ${status}."
+    if ((DESTRUCTIVE_STARTED)); then
+        recovery_notice
+    else
+        warn "No destructive eMMC write was started."
+    fi
+    exit "${status}"
+}
+
+trap cleanup EXIT
+trap 'on_error ${LINENO}' ERR
+trap 'on_signal INT 130' INT
+trap 'on_signal TERM 143' TERM
+
+require_commands() {
+    local command_name missing=()
+    for command_name in awk blkid blockdev cat cmp date dd df e2fsck find findmnt \
+        flock fuser grep gzip head install lsblk mkfs.ext4 mkdir mktemp mount \
+        mountpoint partprobe readlink rm rsync sed sfdisk sha256sum sort stat sync \
+        swapon systemctl tail tr tune2fs udevadm umount wipefs; do
+        command -v "${command_name}" >/dev/null 2>&1 || missing+=("${command_name}")
+    done
+    ((${#missing[@]} == 0)) || die "Missing required commands: ${missing[*]}"
+}
+
+filesystem_field() {
+    local device=$1 field=$2
+    tune2fs -l "${device}" 2>/dev/null |
+        awk -F: -v wanted="${field}" '$1 == wanted { sub(/^[[:space:]]+/, "", $2); print $2; exit }'
+}
+
+filesystem_features() {
+    local device=$1
+    filesystem_field "${device}" "Filesystem features" |
+        tr ' ' '\n' | grep -vx needs_recovery | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+}
+
+verify_boot_filesystem_profile() {
+    local device=$1 context=$2 features state block_size inode_size block_count inode_count
+    features=$(filesystem_features "${device}")
+    state=$(filesystem_field "${device}" "Filesystem state")
+    block_size=$(filesystem_field "${device}" "Block size")
+    inode_size=$(filesystem_field "${device}" "Inode size")
+    block_count=$(filesystem_field "${device}" "Block count")
+    inode_count=$(filesystem_field "${device}" "Inode count")
+    [[ "${features}" == "${BOOT_EXT4_FEATURES}" ]] || die "${context} ext4 features differ from the known-good BOOT profile: ${features}"
+    [[ "${state}" == "clean" ]] || die "${context} ext4 filesystem is not clean: ${state}"
+    [[ "${block_size}" == "${BOOT_EXT4_BLOCK_SIZE}" ]] || die "${context} ext4 block size is ${block_size}, expected ${BOOT_EXT4_BLOCK_SIZE}."
+    [[ "${inode_size}" == "${BOOT_EXT4_INODE_SIZE}" ]] || die "${context} ext4 inode size is ${inode_size}, expected ${BOOT_EXT4_INODE_SIZE}."
+    [[ "${block_count}" == "${BOOT_EXT4_BLOCK_COUNT}" ]] || die "${context} ext4 block count is ${block_count}, expected ${BOOT_EXT4_BLOCK_COUNT}."
+    [[ "${inode_count}" == "${BOOT_EXT4_INODE_COUNT}" ]] || die "${context} ext4 inode count is ${inode_count}, expected ${BOOT_EXT4_INODE_COUNT}."
+}
+
+ensure_package_manager_idle() {
+    local lock proc comm cmdline
+    for lock in /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend \
+        /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
+        [[ -e "${lock}" ]] || continue
+        fuser -s "${lock}" 2>/dev/null && die "Package-manager lock is active: ${lock}"
+    done
+
+    for proc in /proc/[0-9]*/cmdline; do
+        [[ -r "${proc}" ]] || continue
+        comm=$(cat "${proc%/cmdline}/comm" 2>/dev/null || true)
+        cmdline=$(tr '\0' ' ' <"${proc}" 2>/dev/null || true)
+        case "${comm}" in
+            apt|apt-get|dpkg)
+                die "Package-manager process is running: ${comm}"
+                ;;
+        esac
+        case "${cmdline}" in
+            *'/usr/bin/unattended-upgrade '*|*'/usr/lib/apt/apt.systemd.daily '*)
+                die "Automatic package maintenance is running: ${cmdline}"
+                ;;
+        esac
+    done
+}
+
+hash_region() {
+    local source=$1 start=$2 count=$3
+    dd if="${source}" bs="${SECTOR_SIZE}" skip="${start}" count="${count}" status=none |
+        sha256sum | awk '{print $1}'
+}
+
+release_value() {
+    local key=$1
+    sed -nE "s/^${key}=\"?([^\"]*)\"?$/\\1/p" /etc/armbian-release | head -n 1
+}
+
+ensure_unmounted_target() {
+    local node mount_path node_name holder
+    while read -r node; do
+        [[ -n "${node}" ]] || continue
+        mount_path=$(findmnt -rn -S "${node}" -o TARGET | head -n 1 || true)
+        [[ -z "${mount_path}" ]] || die "Target node ${node} is mounted at ${mount_path}; unmount it manually first."
+        fuser -s "${node}" 2>/dev/null && die "Target node ${node} is open by a process."
+        node_name=${node##*/}
+        while read -r holder; do
+            [[ -z "${holder}" ]] || die "Target node ${node} has an active holder: ${holder##*/}"
+        done < <(find "/sys/class/block/${node_name}/holders" -mindepth 1 -maxdepth 1 -print 2>/dev/null || true)
+    done < <(lsblk -lnpo NAME "${TARGET_DISK}")
+
+    while read -r node; do
+        [[ "${node}" == "${TARGET_DISK}"* ]] && die "Target eMMC is active as swap: ${node}"
+    done < <(swapon --noheadings --raw --show=NAME 2>/dev/null || true)
+}
+
+verify_bootloader_sources() {
+    local size full_hash artifact_factory artifact_idb artifact_vendor artifact_uboot sd_factory sd_uboot
+    [[ -f "${BOOTLOADER}" ]] || die "Missing audited bootloader artifact: ${BOOTLOADER}"
+    size=$(stat -c '%s' "${BOOTLOADER}")
+    [[ "${size}" == "${BOOTLOADER_SIZE}" ]] || die "Unexpected bootloader size: ${size}"
+    full_hash=$(sha256sum "${BOOTLOADER}" | awk '{print $1}')
+    [[ "${full_hash}" == "${BOOTLOADER_SHA256}" ]] || die "Audited bootloader SHA256 mismatch."
+
+    artifact_factory=$(hash_region "${BOOTLOADER}" "${IDB_START}" "${FACTORY_IDB_SECTORS}")
+    artifact_idb=$(hash_region "${BOOTLOADER}" "${IDB_START}" "${IDB_SECTORS}")
+    artifact_vendor=$(hash_region "${BOOTLOADER}" "${VENDOR_STORAGE_START}" "${VENDOR_STORAGE_SECTORS}")
+    artifact_uboot=$(hash_region "${BOOTLOADER}" "${UBOOT_START}" "${UBOOT_SECTORS}")
+    [[ "${artifact_factory}" == "${FACTORY_IDB_SHA256}" ]] || die "Factory IDB copies in artifact do not match the audited hash."
+    [[ "${artifact_idb}" == "${IDB_AREA_SHA256}" ]] || die "Sanitized IDB area does not match the audited hash."
+    [[ "${artifact_vendor}" == "${ZERO_VENDOR_STORAGE_SHA256}" ]] || die "Audited bootloader vendor-storage area is not clean."
+    [[ "${artifact_uboot}" == "${UBOOT_AREA_SHA256}" ]] || die "U-Boot/FIT area does not match the audited hash."
+
+    sd_factory=$(hash_region "${SOURCE_DISK}" "${IDB_START}" "${FACTORY_IDB_SECTORS}")
+    sd_uboot=$(hash_region "${SOURCE_DISK}" "${UBOOT_START}" "${UBOOT_SECTORS}")
+    [[ "${sd_factory}" == "${FACTORY_IDB_SHA256}" ]] || die "Running SD does not contain the audited Desk Box factory IDB copies."
+    [[ "${sd_uboot}" == "${UBOOT_AREA_SHA256}" ]] || die "Running SD U-Boot/FIT differs from the audited working artifact."
+}
+
+verify_source_service_link() {
+    local link_path=$1 expected_target=$2 resolved expected_resolved
+    [[ -L "${link_path}" ]] || die "Required source service link is missing: ${link_path}"
+    [[ "$(readlink "${link_path}")" == "${expected_target}" ]] || die "Source service link has an unexpected target: ${link_path}"
+    resolved=$(readlink -e "${link_path}" || true)
+    expected_resolved="/etc/systemd/system/${expected_target#../}"
+    [[ -n "${resolved}" && "${resolved}" == "${expected_resolved}" && -f "${resolved}" ]] || die "Source service link is broken: ${link_path}"
+}
+
+preflight() {
+    [[ ${EUID} -eq 0 ]] || die "Run as root."
+    require_commands
+    ensure_package_manager_idle
+
+    SOURCE_ROOT=$(findmnt -rn -o SOURCE / | head -n 1)
+    SOURCE_BOOT=$(findmnt -rn -o SOURCE /boot | head -n 1)
+    [[ -b "${SOURCE_ROOT}" ]] || die "Root source is not a block partition: ${SOURCE_ROOT}"
+    [[ -b "${SOURCE_BOOT}" ]] || die "/boot must be a separate block partition."
+    SOURCE_DISK="/dev/$(lsblk -nro PKNAME "${SOURCE_ROOT}" | head -n 1)"
+    [[ -b "${SOURCE_DISK}" ]] || die "Cannot resolve the running root disk."
+    [[ "${SOURCE_DISK}" != "${TARGET_DISK}" ]] || die "Refusing to install while booted from the eMMC target."
+    [[ "${SOURCE_ROOT}" == "${SOURCE_DISK}p2" ]] || die "Expected the SD root filesystem on ${SOURCE_DISK}p2."
+    [[ "${SOURCE_BOOT}" == "${SOURCE_DISK}p1" ]] || die "Expected the SD boot filesystem on ${SOURCE_DISK}p1."
+
+    local source_name target_name target_sysfs source_type target_type root_fstype boot_fstype
+    local source_parent boot_parent source_dev target_dev
+    source_name=${SOURCE_DISK##*/}
+    target_name=${TARGET_DISK##*/}
+    target_sysfs="/sys/block/${TARGET_DISK##*/}"
+    source_type=$(cat "/sys/block/${source_name}/device/type" 2>/dev/null || true)
+    target_type=$(cat "${target_sysfs}/device/type" 2>/dev/null || true)
+    [[ "${source_type}" == "SD" ]] || die "Running source ${SOURCE_DISK} is not identified as an SD device."
+    [[ "${TARGET_DISK}" == "/dev/mmcblk2" && "${target_type}" == "MMC" ]] || die "${TARGET_DISK} is not the expected internal eMMC."
+    [[ "$(lsblk -dno TYPE "${SOURCE_DISK}")" == "disk" && "$(lsblk -dno TYPE "${TARGET_DISK}")" == "disk" ]] || die "Source and target must both resolve to whole block disks."
+    source_parent=$(lsblk -nro PKNAME "${SOURCE_ROOT}" | head -n 1)
+    boot_parent=$(lsblk -nro PKNAME "${SOURCE_BOOT}" | head -n 1)
+    [[ "${source_parent}" == "${source_name}" && "${boot_parent}" == "${source_name}" ]] || die "Root and BOOT do not share the verified SD parent disk."
+    source_dev=$(cat "/sys/class/block/${source_name}/dev")
+    target_dev=$(cat "/sys/class/block/${target_name}/dev")
+    [[ "$(readlink -f "${SOURCE_DISK}")" != "$(readlink -f "${TARGET_DISK}")" && "${source_dev}" != "${target_dev}" ]] || die "Source parent disk and target eMMC resolve to the same block device."
+    [[ "$(cat "${target_sysfs}/ro")" == "0" ]] || die "Target eMMC is read-only."
+    [[ "$(blockdev --getss "${SOURCE_DISK}")" == "${SECTOR_SIZE}" ]] || die "Unexpected SD sector size."
+    [[ "$(blockdev --getss "${TARGET_DISK}")" == "${SECTOR_SIZE}" ]] || die "Unexpected eMMC sector size."
+
+    root_fstype=$(findmnt -rn -o FSTYPE /)
+    boot_fstype=$(findmnt -rn -o FSTYPE /boot)
+    [[ "${root_fstype}" == "ext4" && "${boot_fstype}" == "ext4" ]] || die "Desk Box installer requires separate ext4 root and boot filesystems."
+    [[ "$(lsblk -bndo START "${SOURCE_BOOT}")" == "${BOOT_START}" ]] || die "Unexpected SD boot-partition start sector."
+    [[ "$(blockdev --getsz "${SOURCE_BOOT}")" == "${BOOT_SECTORS}" ]] || die "Unexpected SD boot-partition size."
+    [[ "$(lsblk -bndo START "${SOURCE_ROOT}")" == "${ROOT_START}" ]] || die "Unexpected SD root-partition start sector."
+    verify_boot_filesystem_profile "${SOURCE_BOOT}" "Running SD BOOT"
+
+    [[ -r /etc/armbian-release ]] || die "Missing /etc/armbian-release."
+    [[ "$(release_value BOARD)" == "Deskbox" ]] || die "This is not the Deskbox board profile."
+    [[ "$(release_value BOARD_NAME)" == "RK.Deskbox" ]] || die "Unexpected board identity."
+    grep -Fxq 'rockchip,rk3528-box' < <(tr '\0' '\n' </proc/device-tree/compatible) || die "Missing Desk Box RK3528 compatible."
+    grep -Fxq 'rockchip,rk3528a' < <(tr '\0' '\n' </proc/device-tree/compatible) || die "Missing RK3528A compatible."
+    [[ "$(awk -F= '$1 == "fdtfile" { count++ } END { print count+0 }' /boot/armbianEnv.txt)" == "1" ]] || die "armbianEnv.txt must contain exactly one fdtfile entry."
+    grep -Fxq 'fdtfile=rockchip/rk3528-deskbox.dtb' /boot/armbianEnv.txt || die "The active DTB is not rk3528-deskbox.dtb."
+    ! grep -Eq '(^|[= ,])ttyS2([, ]|$)' /boot/armbianEnv.txt || die "armbianEnv.txt still assigns ttyS2 to a console."
+    ! grep -Eq '(^|[[:space:]])console=ttyS2([,[:space:]]|$)' /proc/cmdline || die "The running kernel still uses ttyS2 as a console."
+    [[ -L /etc/systemd/system/serial-getty@ttyS2.service && "$(readlink /etc/systemd/system/serial-getty@ttyS2.service)" == "/dev/null" ]] || die "serial-getty@ttyS2.service is not masked."
+    ! systemctl is-active --quiet serial-getty@ttyS2.service || die "serial-getty@ttyS2.service is active."
+    [[ "$(sha256sum /boot/dtb/rockchip/rk3528-deskbox.dtb | awk '{print $1}')" == "${DTB_SHA256}" ]] || die "The active Desk Box DTB does not match the audited hash."
+    verify_source_service_link /etc/systemd/system/multi-user.target.wants/deskbox-front-panel.service '../deskbox-front-panel.service'
+    verify_source_service_link /etc/systemd/system/sysinit.target.wants/deskbox-front-panel-early.service '../deskbox-front-panel-early.service'
+    verify_source_service_link /etc/systemd/system/multi-user.target.wants/deskbox-bluetooth.service '../deskbox-bluetooth.service'
+
+    [[ -b "${TARGET_DISK}" ]] || die "Target eMMC ${TARGET_DISK} is absent."
+    ensure_unmounted_target
+    TARGET_SECTORS=$(blockdev --getsz "${TARGET_DISK}")
+    TARGET_BYTES=$(blockdev --getsize64 "${TARGET_DISK}")
+    TARGET_LAST_USABLE=$((TARGET_SECTORS - 34))
+    ((TARGET_BYTES >= TARGET_MIN_BYTES && TARGET_BYTES <= TARGET_MAX_BYTES)) || die "Target eMMC capacity is outside the supported 32 GB Desk Box range."
+    TARGET_NAME=$(cat "${target_sysfs}/device/name" 2>/dev/null || true)
+    TARGET_CID=$(cat "${target_sysfs}/device/cid" 2>/dev/null || true)
+    [[ -n "${TARGET_NAME}" && -n "${TARGET_CID}" ]] || die "Cannot read eMMC identity."
+
+    local source_used source_boot_used target_root_capacity target_boot_capacity backup_avail
+    source_used=$(df -B1 --output=used / | tail -n 1 | tr -d ' ')
+    target_root_capacity=$(((TARGET_LAST_USABLE - ROOT_START + 1) * SECTOR_SIZE))
+    ((source_used + 536870912 < target_root_capacity)) || die "The running root filesystem will not fit on eMMC with the required safety margin."
+    source_boot_used=$(df -B1 --output=used /boot | tail -n 1 | tr -d ' ')
+    target_boot_capacity=$((BOOT_SECTORS * SECTOR_SIZE))
+    ((source_boot_used + 67108864 < target_boot_capacity)) || die "The running BOOT filesystem will not fit with the required safety margin."
+    backup_avail=$(df -B1 --output=avail /root | tail -n 1 | tr -d ' ')
+    ((backup_avail > 134217728)) || die "The SD root filesystem needs at least 128 MiB free for the mandatory metadata backup."
+
+    SOURCE_ROOT_UUID=$(findmnt -rn -o UUID / | head -n 1)
+    SOURCE_BOOT_UUID=$(findmnt -rn -o UUID /boot | head -n 1)
+    [[ -n "${SOURCE_ROOT_UUID}" && -n "${SOURCE_BOOT_UUID}" ]] || die "Cannot read source filesystem UUIDs."
+    [[ "$(awk '$2 == "/" { count++ } END { print count+0 }' /etc/fstab)" == "1" ]] || die "Source fstab must contain exactly one root entry."
+    [[ "$(awk '$2 == "/boot" { count++ } END { print count+0 }' /etc/fstab)" == "1" ]] || die "Source fstab must contain exactly one BOOT entry."
+    SOURCE_ROOT_FSTAB_OPTIONS=$(awk '$2 == "/" { print $4; exit }' /etc/fstab)
+    SOURCE_ROOT_FSTAB_DUMP=$(awk '$2 == "/" { print $5; exit }' /etc/fstab)
+    SOURCE_ROOT_FSTAB_PASS=$(awk '$2 == "/" { print $6; exit }' /etc/fstab)
+    SOURCE_BOOT_FSTAB_OPTIONS=$(awk '$2 == "/boot" { print $4; exit }' /etc/fstab)
+    SOURCE_BOOT_FSTAB_DUMP=$(awk '$2 == "/boot" { print $5; exit }' /etc/fstab)
+    SOURCE_BOOT_FSTAB_PASS=$(awk '$2 == "/boot" { print $6; exit }' /etc/fstab)
+    [[ -n "${SOURCE_ROOT_FSTAB_OPTIONS}" && -n "${SOURCE_ROOT_FSTAB_DUMP}" && -n "${SOURCE_ROOT_FSTAB_PASS}" ]] || die "Cannot preserve source root fstab policy."
+    [[ -n "${SOURCE_BOOT_FSTAB_OPTIONS}" && -n "${SOURCE_BOOT_FSTAB_DUMP}" && -n "${SOURCE_BOOT_FSTAB_PASS}" ]] || die "Cannot preserve source BOOT fstab policy."
+    [[ "$(findmnt -rn -o SOURCE -T /root)" == "${SOURCE_ROOT}" ]] || die "Backup destination /root is not on the running SD root filesystem."
+
+    verify_bootloader_sources
+}
+
+verify_partition_geometry() {
+    local boot_parent root_parent boot_start boot_size root_start root_size
+    local expected_root_size boot_type root_type
+    boot_parent=$(lsblk -nro PKNAME "${TARGET_BOOT}" | head -n 1)
+    root_parent=$(lsblk -nro PKNAME "${TARGET_ROOT}" | head -n 1)
+    [[ "${boot_parent}" == "${TARGET_DISK##*/}" && "${root_parent}" == "${TARGET_DISK##*/}" ]] || die "New partitions do not belong to ${TARGET_DISK}."
+
+    boot_start=$(lsblk -bndo START "${TARGET_BOOT}")
+    boot_size=$(blockdev --getsz "${TARGET_BOOT}")
+    root_start=$(lsblk -bndo START "${TARGET_ROOT}")
+    root_size=$(blockdev --getsz "${TARGET_ROOT}")
+    expected_root_size=$((TARGET_LAST_USABLE - ROOT_START + 1))
+    [[ "${boot_start}" == "${BOOT_START}" && "${boot_size}" == "${BOOT_SECTORS}" ]] || die "New BOOT partition geometry is incorrect."
+    [[ "${root_start}" == "${ROOT_START}" && "${root_size}" == "${expected_root_size}" ]] || die "New ROOTFS partition geometry is incorrect."
+
+    boot_type=$(lsblk -nro PARTTYPE "${TARGET_BOOT}" | tr '[:lower:]' '[:upper:]')
+    root_type=$(lsblk -nro PARTTYPE "${TARGET_ROOT}" | tr '[:lower:]' '[:upper:]')
+    [[ "${boot_type}" == "${LINUX_GPT_TYPE}" && "${root_type}" == "${LINUX_GPT_TYPE}" ]] || die "New GPT partition types are incorrect."
+    ensure_unmounted_target
+}
+
+print_plan() {
+    local target_mib root_end
+    target_mib=$((TARGET_BYTES / 1024 / 1024))
+    root_end=${TARGET_LAST_USABLE}
+    cat <<EOF
+
+Desk Box SD -> eMMC plan
+========================
+Mode:                 ${MODE}
+Source SD:            ${SOURCE_DISK}
+Source boot/root:     ${SOURCE_BOOT} / ${SOURCE_ROOT}
+Target eMMC:          ${TARGET_DISK} (${target_mib} MiB, ${TARGET_NAME}, CID ${TARGET_CID})
+Backup destination:   ${BACKUP_ROOT}/<UTC timestamp> on the SD root filesystem
+
+Exact target write layout (512-byte sectors):
+  GPT primary:        sectors 0-33
+  reserved:           sectors 34-63
+  factory IDB/SPL:    sectors 64-5183
+  sanitized IDB gap:  sectors 5184-16383
+  U-Boot/FIT/ATF:     sectors 16384-32767
+  BOOT ext4:          sectors 32768-1079295 (${BOOT_SECTORS} sectors)
+  alignment gap:      sectors 1079296-1081343
+  ROOTFS ext4:        sectors 1081344-${root_end}
+  GPT backup:         final 33 sectors (managed by GPT)
+
+Installer actions:
+  1. Back up the first 32 MiB, final 4 MiB, partition table and device metadata.
+  2. Clear the old 16 MiB pre-partition area and old GPT tail metadata.
+  3. Create a new GPT and two clean ext4 filesystems; pin BOOT to the
+     vendor-U-Boot-validated feature, block-size and inode-size profile.
+  4. Write only the repository-audited IDB/SPL and U-Boot/FIT regions.
+  5. Copy the running SD rootfs and BOOT filesystem with rsync.
+  6. Generate new UUIDs, preserve source fstab mount policy, and update target
+     fstab plus armbianEnv.txt.
+  7. Run fsck, remount read-only, and verify identity, hashes and boot config.
+
+No seller vendor-storage or old eMMC runtime state is copied.
+The running SD is never written and remains the recovery medium.
+EOF
+
+    if [[ "${MODE}" == "dry-run" ]]; then
+        printf '\nDRY RUN ONLY: no files, partition tables, filesystems or block devices were changed.\n'
+    else
+        printf '\nDANGER: --install permanently erases every existing filesystem and file on %s.\n' "${TARGET_DISK}"
+    fi
+}
+
+confirm_install() {
+    local answer expected="ERASE ${TARGET_DISK}"
+    printf '\nType exactly "%s" to continue: ' "${expected}" >&2
+    IFS= read -r answer
+    [[ "${answer}" == "${expected}" ]] || die "Confirmation did not match; no destructive write was started."
+}
+
+create_backup() {
+    local timestamp tail_start
+    timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+    BACKUP_DIR="${BACKUP_ROOT}/${timestamp}"
+    [[ ! -e "${BACKUP_DIR}" ]] || die "Backup directory already exists: ${BACKUP_DIR}"
+    [[ ! -L "${BACKUP_ROOT}" ]] || die "Backup root must not be a symbolic link: ${BACKUP_ROOT}"
+    install -d -m 0700 "${BACKUP_DIR}"
+    [[ "$(findmnt -rn -o SOURCE -T "${BACKUP_DIR}")" == "${SOURCE_ROOT}" ]] || die "Backup directory is not on the running SD root filesystem."
+    [[ "$(lsblk -nro PKNAME "$(findmnt -rn -o SOURCE -T "${BACKUP_DIR}")" | head -n 1)" == "${SOURCE_DISK##*/}" ]] || die "Backup directory resolves to the wrong parent disk."
+    tail_start=$((TARGET_SECTORS - TAIL_BACKUP_SECTORS))
+
+    log "Backing up the first 32 MiB of eMMC."
+    dd if="${TARGET_DISK}" bs=1M count=32 status=progress |
+        gzip -1 >"${BACKUP_DIR}/emmc-prefix-32MiB.img.gz"
+    log "Backing up the final 4 MiB of eMMC."
+    dd if="${TARGET_DISK}" bs="${SECTOR_SIZE}" skip="${tail_start}" count="${TAIL_BACKUP_SECTORS}" status=progress |
+        gzip -1 >"${BACKUP_DIR}/emmc-tail-4MiB.img.gz"
+    sfdisk --dump "${TARGET_DISK}" >"${BACKUP_DIR}/partition-table.sfdisk" 2>"${BACKUP_DIR}/partition-table.stderr"
+    [[ -s "${BACKUP_DIR}/partition-table.sfdisk" ]] || die "The mandatory eMMC partition-table backup is empty."
+    lsblk -O "${TARGET_DISK}" >"${BACKUP_DIR}/lsblk.txt"
+    blkid >"${BACKUP_DIR}/blkid.txt" || true
+    {
+        printf 'target=%s\nsize_bytes=%s\nsectors=%s\nname=%s\ncid=%s\n' \
+            "${TARGET_DISK}" "${TARGET_BYTES}" "${TARGET_SECTORS}" "${TARGET_NAME}" "${TARGET_CID}"
+        printf 'prefix_sectors=0-%s\ntail_start_sector=%s\n' "$((BACKUP_PREFIX_SECTORS - 1))" "${tail_start}"
+        printf 'preinstall_idb_sha256=%s\n' "$(hash_region "${TARGET_DISK}" "${IDB_START}" "${IDB_SECTORS}")"
+        printf 'preinstall_vendor_storage_sha256=%s\n' "$(hash_region "${TARGET_DISK}" "${VENDOR_STORAGE_START}" "${VENDOR_STORAGE_SECTORS}")"
+        printf 'preinstall_uboot_sha256=%s\n' "$(hash_region "${TARGET_DISK}" "${UBOOT_START}" "${UBOOT_SECTORS}")"
+    } >"${BACKUP_DIR}/manifest.txt"
+    gzip -t "${BACKUP_DIR}/emmc-prefix-32MiB.img.gz"
+    gzip -t "${BACKUP_DIR}/emmc-tail-4MiB.img.gz"
+    (cd "${BACKUP_DIR}" && sha256sum emmc-prefix-32MiB.img.gz emmc-tail-4MiB.img.gz >SHA256SUMS)
+    sync
+    log "Backup completed: ${BACKUP_DIR}"
+}
+
+revalidate_target_before_write() {
+    local current_sectors current_bytes current_name current_cid
+    [[ -b "${TARGET_DISK}" ]] || die "Target eMMC disappeared after confirmation."
+    ensure_package_manager_idle
+    ensure_unmounted_target
+    current_sectors=$(blockdev --getsz "${TARGET_DISK}")
+    current_bytes=$(blockdev --getsize64 "${TARGET_DISK}")
+    current_name=$(cat "/sys/block/${TARGET_DISK##*/}/device/name" 2>/dev/null || true)
+    current_cid=$(cat "/sys/block/${TARGET_DISK##*/}/device/cid" 2>/dev/null || true)
+    [[ "${current_sectors}" == "${TARGET_SECTORS}" && "${current_bytes}" == "${TARGET_BYTES}" ]] || die "Target eMMC size changed after preflight."
+    [[ "${current_name}" == "${TARGET_NAME}" && "${current_cid}" == "${TARGET_CID}" ]] || die "Target eMMC identity changed after preflight."
+    [[ "$(cat "/sys/block/${TARGET_DISK##*/}/ro")" == "0" ]] || die "Target eMMC became read-only."
+}
+
+partition_target() {
+    local tail_start
+    tail_start=$((TARGET_SECTORS - TAIL_BACKUP_SECTORS))
+    DESTRUCTIVE_STARTED=1
+    log "Clearing old pre-partition and tail metadata on ${TARGET_DISK}."
+    dd if=/dev/zero of="${TARGET_DISK}" bs=1M count=16 conv=notrunc,fsync status=progress
+    dd if=/dev/zero of="${TARGET_DISK}" bs="${SECTOR_SIZE}" seek="${tail_start}" count="${TAIL_BACKUP_SECTORS}" conv=notrunc,fsync status=progress
+
+    log "Creating the fixed Desk Box GPT layout."
+    sfdisk --wipe always --wipe-partitions always "${TARGET_DISK}" <<EOF
+label: gpt
+unit: sectors
+
+${TARGET_BOOT} : start=${BOOT_START}, size=${BOOT_SECTORS}, type=${LINUX_GPT_TYPE}, name="BOOT"
+${TARGET_ROOT} : start=${ROOT_START}, type=${LINUX_GPT_TYPE}, name="ROOTFS"
+EOF
+    sfdisk --verify "${TARGET_DISK}"
+    partprobe "${TARGET_DISK}"
+    udevadm settle
+    [[ -b "${TARGET_BOOT}" && -b "${TARGET_ROOT}" ]] || die "New eMMC partitions did not appear."
+    verify_partition_geometry
+}
+
+write_boot_chain() {
+    log "Writing audited factory IDB/SPL to sectors ${IDB_START}-$((UBOOT_START - 1))."
+    dd if="${BOOTLOADER}" of="${TARGET_DISK}" bs="${SECTOR_SIZE}" skip="${IDB_START}" seek="${IDB_START}" count="${IDB_SECTORS}" conv=notrunc,fsync status=progress
+    log "Writing audited U-Boot/FIT/ATF to sectors ${UBOOT_START}-$((BOOT_START - 1))."
+    dd if="${BOOTLOADER}" of="${TARGET_DISK}" bs="${SECTOR_SIZE}" skip="${UBOOT_START}" seek="${UBOOT_START}" count="${UBOOT_SECTORS}" conv=notrunc,fsync status=progress
+    log "Explicitly clearing Rockchip vendor-storage sectors ${VENDOR_STORAGE_START}-$((VENDOR_STORAGE_START + VENDOR_STORAGE_SECTORS - 1))."
+    dd if=/dev/zero of="${TARGET_DISK}" bs="${SECTOR_SIZE}" seek="${VENDOR_STORAGE_START}" count="${VENDOR_STORAGE_SECTORS}" conv=notrunc,fsync status=progress
+    sync
+    [[ "$(hash_region "${TARGET_DISK}" "${IDB_START}" "${FACTORY_IDB_SECTORS}")" == "${FACTORY_IDB_SHA256}" ]] || die "Factory IDB/SPL read-back verification failed."
+    [[ "$(hash_region "${TARGET_DISK}" "${IDB_START}" "${IDB_SECTORS}")" == "${IDB_AREA_SHA256}" ]] || die "IDB/SPL read-back verification failed."
+    [[ "$(hash_region "${TARGET_DISK}" "${VENDOR_STORAGE_START}" "${VENDOR_STORAGE_SECTORS}")" == "${ZERO_VENDOR_STORAGE_SHA256}" ]] || die "Vendor-storage zero verification failed."
+    [[ "$(hash_region "${TARGET_DISK}" "${UBOOT_START}" "${UBOOT_SECTORS}")" == "${UBOOT_AREA_SHA256}" ]] || die "U-Boot/FIT read-back verification failed."
+}
+
+format_target() {
+    log "Creating clean ext4 BOOT and ROOTFS filesystems."
+    verify_partition_geometry
+    wipefs --all "${TARGET_BOOT}" >/dev/null
+    wipefs --all "${TARGET_ROOT}" >/dev/null
+    mkfs.ext4 -F -q -L BOOT -b "${BOOT_EXT4_BLOCK_SIZE}" \
+        -I "${BOOT_EXT4_INODE_SIZE}" -O "${BOOT_EXT4_FEATURES_MKFS}" \
+        -i "${BOOT_EXT4_BYTES_PER_INODE}" -m 0 "${TARGET_BOOT}"
+    verify_boot_filesystem_profile "${TARGET_BOOT}" "New eMMC BOOT"
+    mkfs.ext4 -F -q -L ROOTFS -b 4096 -m 0 "${TARGET_ROOT}"
+    sync
+}
+
+run_rsync() {
+    local status
+    set +e
+    rsync "$@"
+    status=$?
+    set -e
+    if ((status == 24)); then
+        warn "Files changed while the live filesystem was copied; the second pass will reconcile them."
+    elif ((status != 0)); then
+        die "rsync failed with status ${status}."
+    fi
+}
+
+mount_target_rw() {
+    WORK_DIR=$(mktemp -d /mnt/deskbox-emmc.XXXXXX)
+    TARGET_ROOT_MOUNT="${WORK_DIR}/root"
+    TARGET_BOOT_MOUNT="${TARGET_ROOT_MOUNT}/boot"
+    install -d -m 0755 "${TARGET_ROOT_MOUNT}"
+    mount -o noatime "${TARGET_ROOT}" "${TARGET_ROOT_MOUNT}"
+    install -d -m 0755 "${TARGET_BOOT_MOUNT}"
+    mount -o noatime "${TARGET_BOOT}" "${TARGET_BOOT_MOUNT}"
+}
+
+assert_target_mounts() {
+    local actual_root actual_boot
+    actual_root=$(findmnt -rn -T "${TARGET_ROOT_MOUNT}" -o SOURCE | head -n 1)
+    actual_boot=$(findmnt -rn -T "${TARGET_BOOT_MOUNT}" -o SOURCE | head -n 1)
+    [[ -n "${actual_root}" ]] || die "ROOTFS rsync destination is not a mountpoint."
+    [[ -n "${actual_boot}" ]] || die "BOOT rsync destination is not a mountpoint."
+    [[ "$(readlink -f "${actual_root}")" == "$(readlink -f "${TARGET_ROOT}")" ]] || die "ROOTFS rsync destination is not mounted from ${TARGET_ROOT}."
+    [[ "$(readlink -f "${actual_boot}")" == "$(readlink -f "${TARGET_BOOT}")" ]] || die "BOOT rsync destination is not mounted from ${TARGET_BOOT}."
+    [[ "${TARGET_ROOT_MOUNT}" == /mnt/deskbox-emmc.*/root ]] || die "Unexpected target root mount path."
+    [[ "${TARGET_BOOT_MOUNT}" == "${TARGET_ROOT_MOUNT}/boot" ]] || die "Unexpected target BOOT mount path."
+}
+
+assert_target_mount_mode() {
+    local expected=$1 mount_path options
+    for mount_path in "${TARGET_ROOT_MOUNT}" "${TARGET_BOOT_MOUNT}"; do
+        options=$(findmnt -rn -T "${mount_path}" -o OPTIONS | head -n 1)
+        [[ ",${options}," == *,${expected},* ]] || die "Target mount ${mount_path} is not mounted ${expected}."
+    done
+}
+
+copy_filesystems() {
+    local -a root_args
+    mount_target_rw
+    root_args=(-aHAXx --numeric-ids --delete-delay --info=progress2
+        '--exclude=/boot/***' '--exclude=/dev/***' '--exclude=/proc/***'
+        '--exclude=/sys/***' '--exclude=/run/***' '--exclude=/tmp/***'
+        '--exclude=/mnt/***' '--exclude=/media/***'
+        '--exclude=/root/deskbox-emmc-backups/***')
+
+    log "Copying the live SD root filesystem to eMMC (first pass)."
+    assert_target_mounts
+    assert_target_mount_mode rw
+    run_rsync "${root_args[@]}" / "${TARGET_ROOT_MOUNT}/"
+    log "Reconciling files changed during the first pass."
+    assert_target_mounts
+    assert_target_mount_mode rw
+    run_rsync "${root_args[@]}" / "${TARGET_ROOT_MOUNT}/"
+    log "Copying the SD BOOT filesystem to eMMC."
+    assert_target_mounts
+    assert_target_mount_mode rw
+    run_rsync -aHAX --numeric-ids --delete --info=progress2 /boot/ "${TARGET_BOOT_MOUNT}/"
+}
+
+rewrite_boot_identity() {
+    local new_root_uuid new_boot_uuid fstab temp_fstab env_file
+    new_root_uuid=$(blkid -s UUID -o value "${TARGET_ROOT}")
+    new_boot_uuid=$(blkid -s UUID -o value "${TARGET_BOOT}")
+    [[ -n "${new_root_uuid}" && -n "${new_boot_uuid}" ]] || die "Cannot read new eMMC filesystem UUIDs."
+    [[ "${new_root_uuid}" != "${SOURCE_ROOT_UUID}" && "${new_boot_uuid}" != "${SOURCE_BOOT_UUID}" ]] || die "New filesystems unexpectedly reused an SD UUID."
+
+    fstab="${TARGET_ROOT_MOUNT}/etc/fstab"
+    [[ -f "${fstab}" ]] || die "Target /etc/fstab is missing."
+    temp_fstab="${fstab}.deskbox-new"
+    awk -v root_uuid="${new_root_uuid}" -v boot_uuid="${new_boot_uuid}" \
+        -v root_options="${SOURCE_ROOT_FSTAB_OPTIONS}" \
+        -v root_dump="${SOURCE_ROOT_FSTAB_DUMP}" -v root_pass="${SOURCE_ROOT_FSTAB_PASS}" \
+        -v boot_options="${SOURCE_BOOT_FSTAB_OPTIONS}" \
+        -v boot_dump="${SOURCE_BOOT_FSTAB_DUMP}" -v boot_pass="${SOURCE_BOOT_FSTAB_PASS}" '
+        BEGIN { root_seen=0; boot_seen=0; OFS="  " }
+        /^[[:space:]]*#/ || NF == 0 { print; next }
+        $2 == "/" {
+            if (!root_seen) {
+                print "UUID=" root_uuid, "/", "ext4", root_options, root_dump, root_pass
+                root_seen=1
+            }
+            next
+        }
+        $2 == "/boot" {
+            if (!boot_seen) {
+                print "UUID=" boot_uuid, "/boot", "ext4", boot_options, boot_dump, boot_pass
+                boot_seen=1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!root_seen) print "UUID=" root_uuid, "/", "ext4", root_options, root_dump, root_pass
+            if (!boot_seen) print "UUID=" boot_uuid, "/boot", "ext4", boot_options, boot_dump, boot_pass
+        }
+    ' "${fstab}" >"${temp_fstab}"
+    install -m 0644 "${temp_fstab}" "${fstab}"
+    rm -f -- "${temp_fstab}"
+
+    env_file="${TARGET_BOOT_MOUNT}/armbianEnv.txt"
+    [[ -f "${env_file}" ]] || die "Target armbianEnv.txt is missing."
+    [[ "$(awk -F= '$1 == "fdtfile" { count++ } END { print count+0 }' "${env_file}")" == "1" ]] || die "Target armbianEnv.txt must contain exactly one fdtfile entry."
+    grep -Fxq 'fdtfile=rockchip/rk3528-deskbox.dtb' "${env_file}" || die "Target BOOT does not select the production Desk Box DTB."
+    awk -v rootdev="UUID=${new_root_uuid}" '
+        BEGIN { rootdev_seen=0; rootfstype_seen=0 }
+        /^rootdev=/ {
+            if (!rootdev_seen) print "rootdev=" rootdev
+            rootdev_seen=1
+            next
+        }
+        /^rootfstype=/ {
+            if (!rootfstype_seen) print "rootfstype=ext4"
+            rootfstype_seen=1
+            next
+        }
+        { print }
+        END {
+            if (!rootdev_seen) print "rootdev=" rootdev
+            if (!rootfstype_seen) print "rootfstype=ext4"
+        }
+    ' "${env_file}" >"${env_file}.deskbox-new"
+    install -m 0644 "${env_file}.deskbox-new" "${env_file}"
+    rm -f -- "${env_file}.deskbox-new"
+
+    grep -Fq "UUID=${new_root_uuid}" "${fstab}" || die "New root UUID is absent from target fstab."
+    grep -Fq "UUID=${new_boot_uuid}" "${fstab}" || die "New BOOT UUID is absent from target fstab."
+    grep -Fxq "rootdev=UUID=${new_root_uuid}" "${env_file}" || die "New root UUID is absent from armbianEnv.txt."
+    [[ "$(grep -c '^rootdev=' "${env_file}")" == "1" ]] || die "Target armbianEnv.txt must contain exactly one rootdev entry."
+    [[ "$(grep -c '^rootfstype=' "${env_file}")" == "1" ]] || die "Target armbianEnv.txt must contain exactly one rootfstype entry."
+    ! grep -Fq "${SOURCE_ROOT_UUID}" "${fstab}" "${env_file}" || die "Source root UUID remains in target boot configuration."
+    ! grep -Fq "${SOURCE_BOOT_UUID}" "${fstab}" "${env_file}" || die "Source BOOT UUID remains in target boot configuration."
+}
+
+unmount_target() {
+    sync
+    if mountpoint -q "${TARGET_BOOT_MOUNT}"; then
+        umount "${TARGET_BOOT_MOUNT}"
+    fi
+    if mountpoint -q "${TARGET_ROOT_MOUNT}"; then
+        umount "${TARGET_ROOT_MOUNT}"
+    fi
+}
+
+check_filesystem() {
+    local device=$1 status
+    set +e
+    e2fsck -f -p "${device}"
+    status=$?
+    set -e
+    ((status <= 1)) || die "e2fsck failed for ${device} with status ${status}."
+}
+
+verify_service_link() {
+    local link_path=$1 expected_target=$2 resolved expected_resolved
+    [[ -L "${link_path}" ]] || die "Required service link is missing: ${link_path#${TARGET_ROOT_MOUNT}}"
+    [[ "$(readlink "${link_path}")" == "${expected_target}" ]] || die "Service link has an unexpected target: ${link_path#${TARGET_ROOT_MOUNT}}"
+    resolved=$(readlink -e "${link_path}" || true)
+    expected_resolved="${TARGET_ROOT_MOUNT}/etc/systemd/system/${expected_target#../}"
+    [[ -n "${resolved}" && "${resolved}" == "${expected_resolved}" && -f "${resolved}" ]] || die "Service link is broken: ${link_path#${TARGET_ROOT_MOUNT}}"
+}
+
+verify_target_read_only() {
+    local root_uuid boot_uuid source_dtb_hash target_dtb_hash root_entries boot_entries
+    local target_root_options target_root_dump target_root_pass
+    local target_boot_options target_boot_dump target_boot_pass
+    root_uuid=$(blkid -s UUID -o value "${TARGET_ROOT}")
+    boot_uuid=$(blkid -s UUID -o value "${TARGET_BOOT}")
+    source_dtb_hash=$(sha256sum /boot/dtb/rockchip/rk3528-deskbox.dtb | awk '{print $1}')
+    [[ "${source_dtb_hash}" == "${DTB_SHA256}" ]] || die "Source Desk Box DTB hash changed after preflight."
+
+    mount -o ro,noload "${TARGET_ROOT}" "${TARGET_ROOT_MOUNT}"
+    mount -o ro,noload "${TARGET_BOOT}" "${TARGET_BOOT_MOUNT}"
+    assert_target_mounts
+    assert_target_mount_mode ro
+    verify_boot_filesystem_profile "${TARGET_BOOT}" "Final eMMC BOOT"
+    target_dtb_hash=$(sha256sum "${TARGET_BOOT_MOUNT}/dtb/rockchip/rk3528-deskbox.dtb" | awk '{print $1}')
+    [[ "${target_dtb_hash}" == "${source_dtb_hash}" && "${target_dtb_hash}" == "${DTB_SHA256}" ]] || die "Target Desk Box DTB failed exact-hash verification."
+    grep -Fxq 'BOARD="Deskbox"' "${TARGET_ROOT_MOUNT}/etc/armbian-release" || die "Target board identity verification failed."
+    grep -Fxq 'BOARD_NAME="RK.Deskbox"' "${TARGET_ROOT_MOUNT}/etc/armbian-release" || die "Target board-name verification failed."
+    [[ "$(awk -F= '$1 == "fdtfile" { count++ } END { print count+0 }' "${TARGET_BOOT_MOUNT}/armbianEnv.txt")" == "1" ]] || die "Target armbianEnv.txt must contain exactly one fdtfile entry."
+    grep -Fxq 'fdtfile=rockchip/rk3528-deskbox.dtb' "${TARGET_BOOT_MOUNT}/armbianEnv.txt" || die "Target production DTB selection verification failed."
+    ! grep -Eq '(^|[= ,])ttyS2([, ]|$)' "${TARGET_BOOT_MOUNT}/armbianEnv.txt" || die "Target armbianEnv.txt assigns ttyS2 to a console."
+    grep -Fxq "rootdev=UUID=${root_uuid}" "${TARGET_BOOT_MOUNT}/armbianEnv.txt" || die "Target rootdev verification failed."
+    [[ "$(grep -c '^rootdev=' "${TARGET_BOOT_MOUNT}/armbianEnv.txt")" == "1" ]] || die "Target armbianEnv.txt has duplicate rootdev entries."
+    [[ "$(grep -c '^rootfstype=' "${TARGET_BOOT_MOUNT}/armbianEnv.txt")" == "1" ]] || die "Target armbianEnv.txt has duplicate rootfstype entries."
+    root_entries=$(awk -v uuid="UUID=${root_uuid}" '$1 == uuid && $2 == "/" && $3 == "ext4" { count++ } END { print count+0 }' "${TARGET_ROOT_MOUNT}/etc/fstab")
+    boot_entries=$(awk -v uuid="UUID=${boot_uuid}" '$1 == uuid && $2 == "/boot" && $3 == "ext4" { count++ } END { print count+0 }' "${TARGET_ROOT_MOUNT}/etc/fstab")
+    [[ "${root_entries}" == "1" ]] || die "Target fstab must contain exactly one correct root entry."
+    [[ "${boot_entries}" == "1" ]] || die "Target fstab must contain exactly one correct BOOT entry."
+    target_root_options=$(awk '$2 == "/" { print $4; exit }' "${TARGET_ROOT_MOUNT}/etc/fstab")
+    target_root_dump=$(awk '$2 == "/" { print $5; exit }' "${TARGET_ROOT_MOUNT}/etc/fstab")
+    target_root_pass=$(awk '$2 == "/" { print $6; exit }' "${TARGET_ROOT_MOUNT}/etc/fstab")
+    target_boot_options=$(awk '$2 == "/boot" { print $4; exit }' "${TARGET_ROOT_MOUNT}/etc/fstab")
+    target_boot_dump=$(awk '$2 == "/boot" { print $5; exit }' "${TARGET_ROOT_MOUNT}/etc/fstab")
+    target_boot_pass=$(awk '$2 == "/boot" { print $6; exit }' "${TARGET_ROOT_MOUNT}/etc/fstab")
+    [[ "${target_root_options}" == "${SOURCE_ROOT_FSTAB_OPTIONS}" && "${target_root_dump}" == "${SOURCE_ROOT_FSTAB_DUMP}" && "${target_root_pass}" == "${SOURCE_ROOT_FSTAB_PASS}" ]] || die "Target root fstab policy differs from the source SD."
+    [[ "${target_boot_options}" == "${SOURCE_BOOT_FSTAB_OPTIONS}" && "${target_boot_dump}" == "${SOURCE_BOOT_FSTAB_DUMP}" && "${target_boot_pass}" == "${SOURCE_BOOT_FSTAB_PASS}" ]] || die "Target BOOT fstab policy differs from the source SD."
+    [[ "$(blkid -s LABEL -o value "${TARGET_ROOT}")" == "ROOTFS" ]] || die "Target ROOTFS label verification failed."
+    [[ "$(blkid -s LABEL -o value "${TARGET_BOOT}")" == "BOOT" ]] || die "Target BOOT label verification failed."
+    [[ -L "${TARGET_ROOT_MOUNT}/etc/systemd/system/serial-getty@ttyS2.service" && "$(readlink "${TARGET_ROOT_MOUNT}/etc/systemd/system/serial-getty@ttyS2.service")" == "/dev/null" ]] || die "Target serial-getty@ttyS2.service is not masked."
+    [[ -x "${TARGET_ROOT_MOUNT}/usr/sbin/deskbox-install-emmc" ]] || die "Installer is missing from the target rootfs."
+    verify_service_link "${TARGET_ROOT_MOUNT}/etc/systemd/system/multi-user.target.wants/deskbox-front-panel.service" '../deskbox-front-panel.service'
+    verify_service_link "${TARGET_ROOT_MOUNT}/etc/systemd/system/sysinit.target.wants/deskbox-front-panel-early.service" '../deskbox-front-panel-early.service'
+    verify_service_link "${TARGET_ROOT_MOUNT}/etc/systemd/system/multi-user.target.wants/deskbox-bluetooth.service" '../deskbox-bluetooth.service'
+    [[ "$(hash_region "${TARGET_DISK}" "${IDB_START}" "${FACTORY_IDB_SECTORS}")" == "${FACTORY_IDB_SHA256}" ]] || die "Final factory IDB/SPL verification failed."
+    [[ "$(hash_region "${TARGET_DISK}" "${IDB_START}" "${IDB_SECTORS}")" == "${IDB_AREA_SHA256}" ]] || die "Final IDB/SPL verification failed."
+    [[ "$(hash_region "${TARGET_DISK}" "${VENDOR_STORAGE_START}" "${VENDOR_STORAGE_SECTORS}")" == "${ZERO_VENDOR_STORAGE_SHA256}" ]] || die "Final vendor-storage zero verification failed."
+    [[ "$(hash_region "${TARGET_DISK}" "${UBOOT_START}" "${UBOOT_SECTORS}")" == "${UBOOT_AREA_SHA256}" ]] || die "Final U-Boot/FIT verification failed."
+    unmount_target
+}
+
+install_to_emmc() {
+    confirm_install
+    revalidate_target_before_write
+    create_backup
+    revalidate_target_before_write
+    partition_target
+    write_boot_chain
+    format_target
+    copy_filesystems
+    rewrite_boot_identity
+    unmount_target
+    log "Running mandatory offline filesystem checks."
+    check_filesystem "${TARGET_BOOT}"
+    check_filesystem "${TARGET_ROOT}"
+    verify_partition_geometry
+    log "Mounting the result read-only for final verification."
+    verify_target_read_only
+    sync
+
+    cat <<EOF
+
+Desk Box eMMC installation completed and verified.
+Backup directory: ${BACKUP_DIR}
+
+Do not remove the tested SD yet. Reboot once with the SD still inserted if you
+want to re-check it, then shut down, disconnect power, remove the SD, and cold
+boot from eMMC. If eMMC boot fails, reinsert the unchanged SD and rerun this
+installer after reviewing the saved backup and error output.
+EOF
+}
+
+main() {
+    parse_args "$@"
+    [[ -d /run/lock ]] || die "Missing runtime lock directory: /run/lock"
+    [[ ! -L "${LOCK_FILE}" ]] || die "Refusing symbolic-link lock file: ${LOCK_FILE}"
+    exec 9>"${LOCK_FILE}"
+    flock -n 9 || die "Another ${PROGRAM} process is already running."
+    preflight
+    print_plan
+    [[ "${MODE}" == "install" ]] || exit 0
+    install_to_emmc
+}
+
+main "$@"

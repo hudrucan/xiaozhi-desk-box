@@ -1,13 +1,15 @@
 [Unit]
 Description=Desk Box AIC8800D80 Bluetooth HCI transport
-After=systemd-modules-load.service
+After=systemd-modules-load.service systemd-rfkill.service
 Before=bluetooth.service
-Wants=bluetooth.service
+Wants=systemd-rfkill.service bluetooth.service
 
 [Service]
 Type=simple
 ExecStartPre=/usr/libexec/deskbox-bluetooth-ready
+ExecStartPre=/usr/sbin/rfkill unblock bluetooth
 ExecStart=/usr/bin/btattach -B /dev/ttyS2 -P h4 -S 1500000
+ExecStartPost=/usr/libexec/deskbox-bluetooth-unblock
 Restart=on-failure
 RestartSec=2s
 

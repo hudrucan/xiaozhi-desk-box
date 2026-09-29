@@ -71,12 +71,25 @@ jobs:
           echo "d1170298577027c2da346242627ff6cad09fbebaa96a6b2de07ada7c873dd337  build-armbian/armbian-files/common-files/usr/lib/firmware/regulatory.db.p7s" | sha256sum --check
           echo "e99de09d48321f36f87d9e0017c57b57c6e38203b17b28640094a18c1d98905d  build-armbian/armbian-files/different-files/deskbox/packages/bluez_5.66-1+deb12u2_arm64.deb" | sha256sum --check
           echo "f9a3003b6bb7bb79c6d017355c3ce6ba9b64d7f32fb95a8bf8158d6185c04f41  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready" | sha256sum --check
-          echo "088286af9ea29fea3f0305d6c9abbae15572c208c9633e499253f313c32e1201  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-bluetooth.service" | sha256sum --check
+          echo "996408f13c167f0907d97d1bb891bf30a5a5a5cee31d7c762eca0a38a7a86d3a  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock" | sha256sum --check
+          echo "dce3bb6794144a5716933c924e358b8e0b2c0b61220e7b34740e8ce9beb5a20c  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-bluetooth.service" | sha256sum --check
           echo "6849958484ea8562ef472577fb27af0bf0cf15eaf4f9eef197dfa91683a78241  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-front-panel" | sha256sum --check
           echo "5b1e00b677896714784630e76eb94105f0e2179ddfd89bca9c3b0b6cf69250d9  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel.service" | sha256sum --check
           echo "ff22962bef8b31af381f55cd87388d65dacd63367331af0a8a83ef8d5c12877a  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel-early.service" | sha256sum --check
+          installer="build-armbian/armbian-files/different-files/deskbox/rootfs/usr/sbin/deskbox-install-emmc"
+          echo "70a5c17c989afa6081d315b2e39f8c5731b9cd16658ac77ebd71555920ede1f8  ${installer}" | sha256sum --check
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready
+          test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
+          sh -n build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-front-panel
+          test -x "${installer}"
+          bash -n "${installer}"
+          grep -Fxq 'After=systemd-modules-load.service systemd-rfkill.service' \
+            build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-bluetooth.service
+          grep -Fxq 'ExecStartPre=/usr/sbin/rfkill unblock bluetooth' \
+            build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-bluetooth.service
+          grep -Fxq 'ExecStartPost=/usr/libexec/deskbox-bluetooth-unblock' \
+            build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-bluetooth.service
           grep -Eq '^r[0-9]+:Desk Box:rk3528:rk3528-deskbox\.dtb:.*:deskbox:yes$' \
             build-armbian/armbian-files/common-files/etc/model_database.conf
           grep -aFq 'Rockchip RK3528 Generic TV Box' "${dtb}"
@@ -250,6 +263,18 @@ jobs:
           grep -qx 'console=display' "${boot}/armbianEnv.txt"
           grep -qx 'consoleargs=console=tty1' "${boot}/armbianEnv.txt"
           echo "041e0471ea06401e6af663d026913b0fa5cdbcc825b1eac7fbebfe96dc52da74  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
+          boot_features=$(sudo tune2fs -l "${audit_loop}p1" | sed -n 's/^Filesystem features:[[:space:]]*//p' | tr ' ' '\n' | grep -vx needs_recovery | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+          test "${boot_features}" = '64bit dir_index dir_nlink ext_attr extent extra_isize filetype flex_bg has_journal huge_file large_file metadata_csum resize_inode sparse_super'
+          test "$(sudo tune2fs -l "${audit_loop}p1" | awk -F: '$1 == "Filesystem state" { gsub(/^[[:space:]]+/, "", $2); print $2 }')" = 'clean'
+          test "$(sudo tune2fs -l "${audit_loop}p1" | awk -F: '$1 == "Block size" { gsub(/[[:space:]]/, "", $2); print $2 }')" = '4096'
+          test "$(sudo tune2fs -l "${audit_loop}p1" | awk -F: '$1 == "Inode size" { gsub(/[[:space:]]/, "", $2); print $2 }')" = '256'
+          test "$(sudo tune2fs -l "${audit_loop}p1" | awk -F: '$1 == "Block count" { gsub(/[[:space:]]/, "", $2); print $2 }')" = '130816'
+          test "$(sudo tune2fs -l "${audit_loop}p1" | awk -F: '$1 == "Inode count" { gsub(/[[:space:]]/, "", $2); print $2 }')" = '130816'
+          test "$(grep -c '^fdtfile=' "${boot}/armbianEnv.txt")" -eq 1
+          if grep -Eq '(^|[= ,])ttyS2([, ]|$)' "${boot}/armbianEnv.txt"; then
+            echo "ttyS2 remains assigned to a console in armbianEnv.txt" >&2
+            exit 1
+          fi
           test "$(find "${boot}/dtb/rockchip" -type f -name '*.dtb' | wc -l)" -eq 1
           if find "${boot}/dtb" -type f \( -name '*.dts' -o -name '*.dtbo' \) -print -quit | grep -q .; then
             echo "Unexpected DTS/DTBO found in final image" >&2
@@ -295,8 +320,16 @@ jobs:
           test -x "${root}/usr/bin/hciattach"
           test -x "${root}/usr/bin/btattach"
           echo "f9a3003b6bb7bb79c6d017355c3ce6ba9b64d7f32fb95a8bf8158d6185c04f41  ${root}/usr/libexec/deskbox-bluetooth-ready" | sha256sum --check
-          echo "088286af9ea29fea3f0305d6c9abbae15572c208c9633e499253f313c32e1201  ${root}/etc/systemd/system/deskbox-bluetooth.service" | sha256sum --check
+          echo "996408f13c167f0907d97d1bb891bf30a5a5a5cee31d7c762eca0a38a7a86d3a  ${root}/usr/libexec/deskbox-bluetooth-unblock" | sha256sum --check
+          echo "dce3bb6794144a5716933c924e358b8e0b2c0b61220e7b34740e8ce9beb5a20c  ${root}/etc/systemd/system/deskbox-bluetooth.service" | sha256sum --check
+          test -x "${root}/usr/libexec/deskbox-bluetooth-unblock"
+          sh -n "${root}/usr/libexec/deskbox-bluetooth-unblock"
           test "$(readlink "${root}/etc/systemd/system/multi-user.target.wants/deskbox-bluetooth.service")" = '../deskbox-bluetooth.service'
+          test "$(readlink -e "${root}/etc/systemd/system/multi-user.target.wants/deskbox-bluetooth.service")" = "${root}/etc/systemd/system/deskbox-bluetooth.service"
+          grep -Fxq 'After=systemd-modules-load.service systemd-rfkill.service' "${root}/etc/systemd/system/deskbox-bluetooth.service"
+          grep -Fxq 'ExecStartPre=/usr/sbin/rfkill unblock bluetooth' "${root}/etc/systemd/system/deskbox-bluetooth.service"
+          grep -Fxq 'ExecStartPost=/usr/libexec/deskbox-bluetooth-unblock' "${root}/etc/systemd/system/deskbox-bluetooth.service"
+          test ! -e "${root}/var/lib/systemd/rfkill"
           test -L "${root}/etc/systemd/system/bluetooth.target.wants/bluetooth.service"
           test -L "${root}/etc/systemd/system/dbus-org.bluez.service"
           echo "Pinned BlueZ package, Desk Box HCI payload and service enablement passed."
@@ -309,7 +342,22 @@ jobs:
           test -x "${root}/usr/bin/chronyc"
           test "$(readlink "${root}/etc/systemd/system/multi-user.target.wants/deskbox-front-panel.service")" = '../deskbox-front-panel.service'
           test "$(readlink "${root}/etc/systemd/system/sysinit.target.wants/deskbox-front-panel-early.service")" = '../deskbox-front-panel-early.service'
+          test "$(readlink -e "${root}/etc/systemd/system/multi-user.target.wants/deskbox-front-panel.service")" = "${root}/etc/systemd/system/deskbox-front-panel.service"
+          test "$(readlink -e "${root}/etc/systemd/system/sysinit.target.wants/deskbox-front-panel-early.service")" = "${root}/etc/systemd/system/deskbox-front-panel-early.service"
           echo "FD6551 front-panel payload and service enablement passed."
+
+          installer="${root}/usr/sbin/deskbox-install-emmc"
+          echo "70a5c17c989afa6081d315b2e39f8c5731b9cd16658ac77ebd71555920ede1f8  ${installer}" | sha256sum --check
+          test -x "${installer}"
+          bash -n "${installer}"
+          for tool in \
+            usr/bin/fuser usr/bin/flock usr/bin/findmnt usr/bin/lsblk \
+            usr/bin/rsync usr/bin/sort usr/bin/systemctl usr/bin/udevadm usr/sbin/blkid usr/sbin/blockdev \
+            usr/sbin/e2fsck usr/sbin/mkfs.ext4 usr/sbin/partprobe usr/sbin/swapon \
+            usr/sbin/sfdisk usr/sbin/tune2fs usr/sbin/wipefs; do
+            test -x "${root}/${tool}" || { echo "Installer dependency missing: /${tool}" >&2; exit 1; }
+          done
+          echo "Desk Box eMMC installer payload, syntax and uncommon runtime dependencies passed."
 
           assert_absent() {
             if [[ -e "$1" ]]; then
@@ -410,8 +458,9 @@ jobs:
             '- Pinned input hashes verified.' \
             '- Final image mounted read-only and audited.' \
             '- Desk Box identity, Lima + UART2_M0 DTB delta, regulatory database and AIC8800D80 firmware allowlist verified.' \
-            '- BlueZ, UART2_M0 pinmux and automatic HCI service payload/enablement verified.' \
+            '- BlueZ, UART2_M0 HCI service and deterministic Bluetooth rfkill unblock verified.' \
             '- FD6551 front-panel payload and automatic service enablement verified.' \
+            '- Guarded Desk Box SD-to-eMMC installer and vendor-U-Boot-compatible BOOT ext4 profile audited.' \
             '- Kernel release, AIC8800 SDIO modules and raw bootloader regions verified.' \
             '- Generic updater/sync/software-center helpers and build artifacts absent.' \
             '' \
