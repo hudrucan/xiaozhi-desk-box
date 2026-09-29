@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -eu
+
+sdio_driver_bound() {
+    find "/sys/bus/sdio/drivers/$1" -mindepth 1 -maxdepth 1 -type l \
+        -print -quit 2>/dev/null | grep -q .
+}
+
+attempt=0
+while [ "${attempt}" -lt 60 ]; do
+    if [ -c /dev/ttyS2 ] && \
+        sdio_driver_bound aicbsp_sdio && \
+        sdio_driver_bound aicwf_sdio; then
+        exit 0
+    fi
+
+    attempt=$((attempt + 1))
+    sleep 1
+done
+
+echo "Desk Box Bluetooth prerequisites did not appear within 60 seconds." >&2
+exit 1

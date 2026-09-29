@@ -41,10 +41,10 @@ device.
 | Default build kernel | `6.1.174-rk35xx-ophub` |
 | Hardware-validated baseline | `6.1.174-rk35xx-ophub` |
 | Active DTB | `rockchip/rk3528-deskbox.dtb` |
-| Device-tree model | `Rockchip RK3528 Generic TV Box` (opaque known-good binary) |
+| Device-tree model | `Rockchip RK3528 Generic TV Box` (retained from known-good baseline) |
 | Wi-Fi | AIC8800D80 over SDIO |
 | GPU | Mali-450 using Lima |
-| Bluetooth | BlueZ 5.66 userspace; HCI GPIO mapping not yet enabled |
+| Bluetooth | AIC8800D80 H4 over UART2_M0 at 1.5 Mbps; BlueZ 5.66 |
 | Timezone / regulatory domain | `Asia/Ho_Chi_Minh` / `VN` |
 
 The project intentionally does not build a kernel or U-Boot. It assembles a
@@ -61,11 +61,11 @@ The reference Desk Box uses:
 - Ethernet and removable microSD storage.
 
 The functional baseline for this profile was boot-tested from microSD with
-Ethernet, SSH, multi-user systemd startup, AIC8800D80 Wi-Fi and Lima graphics
-operational. BlueZ userspace is present, but no automatic HCI attachment is
-enabled until the board-specific Bluetooth reset/wake wiring is verified. Each
-newly published image still requires a hardware boot test. Installing to eMMC
-is outside this repository's automated test scope.
+Ethernet, SSH, multi-user systemd startup, AIC8800D80 Wi-Fi, Lima graphics and
+Bluetooth operational. Bluetooth HCI Reset, BR/EDR + LE controller discovery
+and a BlueZ scan were validated over UART2_M0 at 1.5 Mbps with hardware flow
+control. Each newly published image still requires a hardware boot test.
+Installing to eMMC is outside this repository's automated test scope.
 
 ## Download and first boot
 
@@ -150,11 +150,12 @@ for provenance, offsets and hashes.
 reference box (SHA256
 `a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2`).
 The active binary (SHA256
-`8fdefb1d2efca2115b161da77478109bd11fca64cb9b346f1f3f7082fae1e8e0`)
-contains the Lima configuration verified on the same microSD installation.
-It was edited in place, not decompiled and recompiled. A normalized comparison
-shows changes only under `/gpu@ff700000`: the Rockchip/Lima compatibles,
-bus/core clocks, assigned rates and standard Lima interrupt names.
+`041e0471ea06401e6af663d026913b0fa5cdbcc825b1eac7fbebfe96dc52da74`)
+contains the Lima configuration and UART2_M0 pinmux verified on the same
+microSD installation. The Bluetooth delta selects GPIO3_A0/A1 for UART RX/TX,
+GPIO3_A3 for CTS and GPIO3_A2 for RTS. The existing reset/wake properties are
+unchanged. A normalized comparison against the prior Lima DTB shows no other
+functional device-tree delta.
 
 The internal `model` (`Rockchip RK3528 Generic TV Box`) and
 `wifi_chip_type` (`ap6275s`) remain untouched. The latter is legacy
@@ -169,9 +170,10 @@ database/signature are included in initramfs, and the driver starts with
 `country_code=VN custregd=0`. See
 [`FIRMWARE.md`](build-armbian/armbian-files/different-files/deskbox/FIRMWARE.md).
 
-The image also installs the pinned Debian Bookworm BlueZ package and frees
-UART2 from the serial console/getty. It deliberately does not ship an
-experimental `hciattach` service or unverified Bluetooth GPIO commands. See
+The image also installs the pinned Debian Bookworm BlueZ package, frees UART2
+from the serial console/getty and starts `btattach` only after the AIC8800D80
+SDIO functions bind. The service uses the hardware-validated H4 transport at
+1.5 Mbps; it does not toggle unverified GPIOs. See
 [`PACKAGES.md`](build-armbian/armbian-files/different-files/deskbox/PACKAGES.md).
 
 ## Repository map

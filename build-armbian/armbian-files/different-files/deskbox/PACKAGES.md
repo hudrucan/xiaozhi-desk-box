@@ -11,6 +11,14 @@ Source:
 `https://deb.debian.org/debian/pool/main/b/bluez/bluez_5.66-1+deb12u2_arm64.deb`
 
 The package and service startup were verified on the reference Desk Box. The
-image frees UART2 from the serial console and masks its serial getty, but does
-not auto-attach the Bluetooth HCI transport: the board-specific AIC8800D80
-reset/wake GPIO mapping is not yet verified.
+image frees UART2 from the serial console, masks its serial getty and attaches
+the AIC8800D80 H4 transport with:
+
+```text
+btattach -B /dev/ttyS2 -P h4 -S 1500000
+```
+
+The DTB selects UART2_M0 (GPIO3_A0/A1 RX/TX, GPIO3_A3 CTS and GPIO3_A2 RTS).
+The pre-start helper waits for both AIC SDIO functions to bind before starting
+the transport; it does not drive reset or wake GPIOs. HCI Reset, BR/EDR + LE
+controller registration and a BlueZ scan were validated on the reference box.

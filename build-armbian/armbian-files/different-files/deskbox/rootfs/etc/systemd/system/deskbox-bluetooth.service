@@ -1,0 +1,15 @@
+[Unit]
+Description=Desk Box AIC8800D80 Bluetooth HCI transport
+After=systemd-modules-load.service
+Before=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/libexec/deskbox-bluetooth-ready
+ExecStart=/usr/bin/btattach -B /dev/ttyS2 -P h4 -S 1500000
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target

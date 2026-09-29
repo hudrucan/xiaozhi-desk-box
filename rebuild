@@ -1267,6 +1267,13 @@ refactor_rootfs() {
         rm -f "${policy_rc}" "tmp/${bluez_package_name}"
         [[ -n "${policy_rc_backup}" ]] && mv -f "${policy_rc_backup}" "${policy_rc}"
 
+        # UART2_M0 and the AIC H4 transport were validated on the reference
+        # Desk Box at 1.5 Mbps. Enable the board-specific attachment service;
+        # its pre-start helper waits for both AIC SDIO functions to bind.
+        mkdir -p etc/systemd/system/multi-user.target.wants
+        ln -sfn ../deskbox-bluetooth.service \
+            etc/systemd/system/multi-user.target.wants/deskbox-bluetooth.service
+
         # Keep only the repository-pinned AIC8800D80 firmware and the tested
         # regulatory database/signature required during early module probing.
         find usr/lib/firmware -mindepth 1 -maxdepth 1 \
