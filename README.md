@@ -26,7 +26,7 @@ device.
 | | |
 |---|---|
 | 🎯 **One target** | Only the `deskbox` board profile is exposed. |
-| 🔒 **Pinned inputs** | Base image, rk35xx kernel bundle, DTB, bootloader and Wi-Fi firmware are checksum-verified. |
+| 🔒 **Pinned inputs** | Base image, rk35xx kernel bundle, DTB, bootloader, Wi-Fi firmware, regulatory database and BlueZ package are checksum-verified. |
 | 🧹 **Focused image** | One DTB, one AIC8800D80 firmware set, no kernel headers, generic startup hooks, package caches or upstream self-update helpers. |
 | 🔍 **Release audit** | Every published image is mounted read-only and checked before upload. |
 | 🧱 **Known-good boot chain** | Factory-compatible DDR/SPL is paired with the validated RK3528 U-Boot/FIT/ATF payload. |
@@ -39,10 +39,12 @@ device.
 | Runtime model | `RK.Deskbox` |
 | Distribution | Debian Bookworm, arm64 server |
 | Default build kernel | `6.1.174-rk35xx-ophub` |
-| Hardware-validated baseline | `6.1.157-rk35xx-ophub` |
+| Hardware-validated baseline | `6.1.174-rk35xx-ophub` |
 | Active DTB | `rockchip/rk3528-deskbox.dtb` |
-| Device-tree model | `Rockchip RK3528 Desk Box` |
+| Device-tree model | `Rockchip RK3528 Generic TV Box` (opaque known-good binary) |
 | Wi-Fi | AIC8800D80 over SDIO |
+| GPU | Mali-450 using Lima |
+| Bluetooth | BlueZ 5.66 userspace; HCI GPIO mapping not yet enabled |
 | Timezone / regulatory domain | `Asia/Ho_Chi_Minh` / `VN` |
 
 The project intentionally does not build a kernel or U-Boot. It assembles a
@@ -59,9 +61,11 @@ The reference Desk Box uses:
 - Ethernet and removable microSD storage.
 
 The functional baseline for this profile was boot-tested from microSD with
-Ethernet, SSH, multi-user systemd startup and AIC8800D80 Wi-Fi operational.
-Each newly published image still requires a hardware boot test. Installing to
-eMMC is outside this repository's automated test scope.
+Ethernet, SSH, multi-user systemd startup, AIC8800D80 Wi-Fi and Lima graphics
+operational. BlueZ userspace is present, but no automatic HCI attachment is
+enabled until the board-specific Bluetooth reset/wake wiring is verified. Each
+newly published image still requires a hardware boot test. Installing to eMMC
+is outside this repository's automated test scope.
 
 ## Download and first boot
 
@@ -100,7 +104,7 @@ the image rebuild engine directly.
 flowchart LR
     base["Pinned Bookworm base image"] --> rebuild["Desk Box rebuild"]
     kernel["Pinned rk35xx kernel bundle"] --> rebuild
-    payloads["DTB + bootloader + AIC8800D80 firmware"] --> rebuild
+    payloads["DTB + bootloader + AIC8800D80 firmware + BlueZ"] --> rebuild
     rebuild --> image["desk-box-rk3528-6.1.174-rN-aN.img.gz"]
     image --> audit["Read-only image audit"]
     audit --> release["GitHub Release"]
@@ -132,8 +136,8 @@ The microSD baseline was verified on the reference device:
 - Ethernet, SSH and AIC8800D80 Wi-Fi worked.
 
 Kernel `6.1.174` is the current build default. Its release checksum and both
-AIC8800 SDIO modules were verified before pinning, but it remains a candidate
-until the resulting image completes the same microSD hardware test.
+AIC8800 SDIO modules were verified before pinning, and the resulting image has
+completed a successful microSD boot test on the reference Desk Box.
 
 The board bootloader keeps the factory-compatible DDR parameters required by
 the Micron DDR3 layout. See
@@ -142,20 +146,33 @@ for provenance, offsets and hashes.
 
 ## Device tree and firmware
 
-`rk3528-deskbox.dts` is the canonical decompilation of the known-good reference
-DTB. The compiled Desk Box DTB differs only in audited metadata:
+`rk3528-deskbox.dtb` starts from the exact opaque binary from the working
+reference box (SHA256
+`a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2`).
+The active binary (SHA256
+`8fdefb1d2efca2115b161da77478109bd11fca64cb9b346f1f3f7082fae1e8e0`)
+contains the Lima configuration verified on the same microSD installation.
+It was edited in place, not decompiled and recompiled. A normalized comparison
+shows changes only under `/gpu@ff700000`: the Rockchip/Lima compatibles,
+bus/core clocks, assigned rates and standard Lima interrupt names.
 
-1. `/model`: `Rockchip RK3528 Generic TV Box` → `Rockchip RK3528 Desk Box`;
-2. `/wireless-wlan/wifi_chip_type`: `ap6275s` → `AIC8800D80`.
-
-GPIO, pinctrl, host-wake, pwrseq, controller configuration and bus frequencies
-are unchanged. The source-compatible strings remain `rockchip,rk3528-box` and
-`rockchip,rk3528`; the validated bootloader applies the runtime RK3528A fixup
-seen on the reference device.
+The internal `model` (`Rockchip RK3528 Generic TV Box`) and
+`wifi_chip_type` (`ap6275s`) remain untouched. The latter is legacy
+Rockchip platform data rather than AIC chip detection: the kernel identifies
+the actual AIC8800D80 through its SDIO IDs and loads the pinned AIC modules and
+firmware. Desk Box identity is supplied by the `deskbox` profile, the active
+DTB filename and runtime metadata outside the opaque DTB.
 
 The seven AIC8800D80 firmware files are an explicit allowlist matching both the
-reference device and their documented upstream hashes. See
+reference device and their documented upstream hashes. The tested regulatory
+database/signature are included in initramfs, and the driver starts with
+`country_code=VN custregd=0`. See
 [`FIRMWARE.md`](build-armbian/armbian-files/different-files/deskbox/FIRMWARE.md).
+
+The image also installs the pinned Debian Bookworm BlueZ package and frees
+UART2 from the serial console/getty. It deliberately does not ship an
+experimental `hciattach` service or unverified Bluetooth GPIO commands. See
+[`PACKAGES.md`](build-armbian/armbian-files/different-files/deskbox/PACKAGES.md).
 
 ## Repository map
 
@@ -165,8 +182,9 @@ reference device and their documented upstream hashes. See
 | `action.yml` | Minimal single-target rebuild action |
 | `rebuild` | Shared upstream image transformation engine |
 | `build-armbian/armbian-files/different-files/deskbox/` | Desk Box rootfs overrides and bootloader |
-| `build-armbian/armbian-files/platform-files/rockchip/` | RK3528 boot configuration and canonical DTB/DTS |
+| `build-armbian/armbian-files/platform-files/rockchip/` | RK3528 boot configuration and pinned known-good DTB |
 | `build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio/` | AIC8800D80 firmware allowlist |
+| `build-armbian/armbian-files/common-files/usr/lib/firmware/regulatory.db*` | Tested regulatory database and signature |
 
 The `rebuild` engine retains generic platform mechanics inherited from upstream
 because they implement partitioning, rootfs conversion and boot assembly. The

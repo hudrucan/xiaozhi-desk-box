@@ -1,7 +1,8 @@
 # Desk Box firmware provenance
 
-The image carries only the seven AIC8800D80 SDIO firmware files stored under
-`common-files/usr/lib/firmware/aic8800_sdio`.
+The image carries the seven AIC8800D80 SDIO firmware files stored under
+`common-files/usr/lib/firmware/aic8800_sdio`, plus the regulatory database and
+signature verified on the reference Desk Box.
 
 - Source: `ophub/firmware`
 - Source commit: `4aef5903bc6c04c4bce408c8883bc05f43f168ba`
@@ -22,3 +23,12 @@ The image carries only the seven AIC8800D80 SDIO firmware files stored under
 The running kernel requested the patch table, ADID, patch and FMAC firmware
 from this directory. The remaining three files are retained as part of the
 matching AIC8800D80 firmware set, including Bluetooth support.
+
+| Regulatory file | SHA256 |
+| --- | --- |
+| `regulatory.db` | `9d171281bfe7acc5d203007427f6075b704b7a48ff42ae25b9f490a0118fe7d2` |
+| `regulatory.db.p7s` | `d1170298577027c2da346242627ff6cad09fbebaa96a6b2de07ada7c873dd337` |
+
+The Desk Box initramfs hook includes both files before the AIC8800D80 probes.
+The module is configured with `country_code=VN custregd=0`; the latter keeps
+the driver's permissive testing rules disabled.

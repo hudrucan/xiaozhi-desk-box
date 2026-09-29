@@ -5,6 +5,6 @@ rootdev=/dev/mmcblk0p2
 rootfstype=ext4
 rootflags=rw,errors=remount-ro
 extraargs=rw rootwait
-console=both
-consoleargs=console=ttyS2,1500000
+console=display
+consoleargs=console=tty1
 overlay_prefix=rk35xx

@@ -41,6 +41,7 @@ git
 gpg
 gzip
 imagemagick
+initramfs-tools-core
 jq
 kmod
 libbison-dev

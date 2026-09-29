@@ -437,6 +437,9 @@ download_depends() {
 
     deskbox_bootloader="${different_files}/deskbox/u-boot/bootloader.bin"
     deskbox_firmware="${firmware_path}/aic8800_sdio"
+    deskbox_regdb="${firmware_path}/regulatory.db"
+    deskbox_regdb_signature="${firmware_path}/regulatory.db.p7s"
+    deskbox_bluez_package="${different_files}/deskbox/packages/bluez_5.66-1+deb12u2_arm64.deb"
     deskbox_firmware_files=(
         aic_userconfig_8800d80.txt
         fmacfw_8800d80_u02.bin
@@ -452,7 +455,18 @@ download_depends() {
         [[ -s "${deskbox_firmware}/${firmware_file}" ]] ||
             error_msg "Missing Desk Box firmware: [ ${deskbox_firmware}/${firmware_file} ]"
     done
-    echo -e "${INFO} Repository-pinned bootloader and AIC8800D80 firmware are complete."
+    [[ -s "${deskbox_regdb}" ]] || error_msg "Missing Desk Box regulatory database: [ ${deskbox_regdb} ]"
+    [[ -s "${deskbox_regdb_signature}" ]] ||
+        error_msg "Missing Desk Box regulatory signature: [ ${deskbox_regdb_signature} ]"
+    [[ -s "${deskbox_bluez_package}" ]] ||
+        error_msg "Missing Desk Box BlueZ package: [ ${deskbox_bluez_package} ]"
+    echo "9d171281bfe7acc5d203007427f6075b704b7a48ff42ae25b9f490a0118fe7d2  ${deskbox_regdb}" |
+        sha256sum --check --status || error_msg "Desk Box regulatory database checksum failed."
+    echo "d1170298577027c2da346242627ff6cad09fbebaa96a6b2de07ada7c873dd337  ${deskbox_regdb_signature}" |
+        sha256sum --check --status || error_msg "Desk Box regulatory signature checksum failed."
+    echo "e99de09d48321f36f87d9e0017c57b57c6e38203b17b28640094a18c1d98905d  ${deskbox_bluez_package}" |
+        sha256sum --check --status || error_msg "Desk Box BlueZ package checksum failed."
+    echo -e "${INFO} Repository-pinned bootloader, firmware, regulatory data and BlueZ are complete."
 }
 
 query_kernel() {
@@ -1221,9 +1235,36 @@ refactor_rootfs() {
     }
 
     if [[ "${board}" == "deskbox" ]]; then
-        # Keep only the repository-pinned AIC8800D80 firmware set. This also
-        # removes generic firmware inherited from the upstream base image.
-        find usr/lib/firmware -mindepth 1 -maxdepth 1 ! -name aic8800_sdio -exec rm -rf -- {} +
+        # Install the pinned Bookworm BlueZ package without starting services
+        # inside the build chroot. qemu-user-static/binfmt handles the arm64
+        # maintainer scripts on the x86_64 rebuild host.
+        bluez_package_name="$(basename "${deskbox_bluez_package}")"
+        cp -f "${deskbox_bluez_package}" "tmp/${bluez_package_name}"
+        policy_rc="usr/sbin/policy-rc.d"
+        policy_rc_backup=""
+        if [[ -e "${policy_rc}" || -L "${policy_rc}" ]]; then
+            policy_rc_backup="${policy_rc}.deskbox-backup"
+            [[ ! -e "${policy_rc_backup}" && ! -L "${policy_rc_backup}" ]] ||
+                error_msg "Refusing to overwrite an existing policy-rc.d backup."
+            mv -f "${policy_rc}" "${policy_rc_backup}"
+        fi
+        printf '#!/bin/sh\nexit 101\n' >"${policy_rc}"
+        chmod 755 "${policy_rc}"
+        if ! chroot "${tag_rootfs}" /usr/bin/dpkg --install "/tmp/${bluez_package_name}"; then
+            rm -f "${policy_rc}" "tmp/${bluez_package_name}"
+            [[ -n "${policy_rc_backup}" ]] && mv -f "${policy_rc_backup}" "${policy_rc}"
+            error_msg "Failed to install the pinned Desk Box BlueZ package."
+        fi
+        rm -f "${policy_rc}" "tmp/${bluez_package_name}"
+        [[ -n "${policy_rc_backup}" ]] && mv -f "${policy_rc_backup}" "${policy_rc}"
+
+        # Keep only the repository-pinned AIC8800D80 firmware and the tested
+        # regulatory database/signature required during early module probing.
+        find usr/lib/firmware -mindepth 1 -maxdepth 1 \
+            ! -name aic8800_sdio \
+            ! -name regulatory.db \
+            ! -name regulatory.db.p7s \
+            -exec rm -rf -- {} +
 
         # Remove the generic multi-board startup/IRQ hooks even when they were
         # already present in the upstream base image.
@@ -1239,6 +1280,24 @@ refactor_rootfs() {
         rm -f var/cache/apt/archives/*.deb
         rm -rf var/cache/apt/archives/partial/*
         rm -f root/.bash_history
+
+        # Regenerate this kernel's initramfs so the regulatory database and
+        # its signature are available before the AIC8800D80 module probes.
+        [[ -f "${initramfs_conf}" ]] || error_msg "Missing [ ${initramfs_conf} ]"
+        mkdir -p "${tag_rootfs}/boot"
+        mount --bind "${tag_bootfs}" "${tag_rootfs}/boot" ||
+            error_msg "Failed to bind the Desk Box boot partition for initramfs generation."
+        if ! sed -i 's|^update_initramfs=.*|update_initramfs=yes|' "${initramfs_conf}"; then
+            umount "${tag_rootfs}/boot" 2>/dev/null || true
+            error_msg "Failed to enable Desk Box initramfs generation."
+        fi
+        if ! chroot "${tag_rootfs}" /usr/sbin/update-initramfs -u -k "${kernel_name}"; then
+            sed -i 's|^update_initramfs=.*|update_initramfs=no|' "${initramfs_conf}"
+            umount "${tag_rootfs}/boot" 2>/dev/null || true
+            error_msg "Failed to regenerate the Desk Box initramfs."
+        fi
+        sed -i 's|^update_initramfs=.*|update_initramfs=no|' "${initramfs_conf}"
+        umount "${tag_rootfs}/boot" || error_msg "Failed to unmount the Desk Box boot bind mount."
     fi
 
     # Add custom Armbian information
