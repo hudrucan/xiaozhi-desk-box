@@ -1301,6 +1301,22 @@ refactor_rootfs() {
         rm -rf usr/share/ophub/armbian-software
         [[ -f etc/rc.local ]] && sed -i '\|/etc/custom_service/start_service.sh|d' etc/rc.local
 
+        # These upstream services were verified unused on the Desk Box. Keep
+        # their packages available, but remove both native systemd and legacy
+        # SysV enablement so they do not consume resources or expose rpcbind.
+        deskbox_disabled_services=(
+            watchdog.service
+            rpcbind.socket
+            rpcbind.service
+            nfs-client.target
+            openvpn.service
+            vnstat.service
+        )
+        if ! chroot "${tag_rootfs}" /usr/bin/systemctl disable \
+            "${deskbox_disabled_services[@]}"; then
+            error_msg "Failed to disable unused Desk Box services."
+        fi
+
         # Remove build-time package metadata and caches from the final image.
         rm -rf var/lib/apt/lists/*
         rm -f var/cache/apt/archives/*.deb

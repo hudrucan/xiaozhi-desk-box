@@ -359,6 +359,23 @@ jobs:
           done
           echo "Desk Box eMMC installer payload, syntax and uncommon runtime dependencies passed."
 
+          disabled_services=(
+            watchdog.service
+            rpcbind.socket
+            rpcbind.service
+            nfs-client.target
+            openvpn.service
+            vnstat.service
+          )
+          for unit in "${disabled_services[@]}"; do
+            state=$(sudo systemctl --root="${root}" is-enabled "${unit}" 2>/dev/null || true)
+            if [[ "${state}" != "disabled" ]]; then
+              echo "Unused service is not disabled in final image: ${unit} (${state:-unknown})" >&2
+              exit 1
+            fi
+          done
+          echo "Unused watchdog, RPC/NFS, OpenVPN and vnStat services are disabled."
+
           assert_absent() {
             if [[ -e "$1" ]]; then
               echo "Unexpected final-image path: $1" >&2
@@ -461,6 +478,7 @@ jobs:
             '- BlueZ, UART2_M0 HCI service and deterministic Bluetooth rfkill unblock verified.' \
             '- FD6551 front-panel payload and automatic service enablement verified.' \
             '- Guarded Desk Box SD-to-eMMC installer and vendor-U-Boot-compatible BOOT ext4 profile audited.' \
+            '- Unused watchdog, RPC/NFS, OpenVPN and vnStat services disabled.' \
             '- Kernel release, AIC8800 SDIO modules and raw bootloader regions verified.' \
             '- Generic updater/sync/software-center helpers and build artifacts absent.' \
             '' \
