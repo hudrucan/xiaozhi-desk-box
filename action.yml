@@ -9,7 +9,7 @@ inputs:
   kernel_version:
     description: Exact rk35xx kernel version.
     required: false
-    default: "6.1.157"
+    default: "6.1.174"
   builder_name:
     description: Builder signature stored in image metadata.
     required: false
@@ -19,6 +19,9 @@ outputs:
   output_path:
     description: Directory containing the rebuilt image.
     value: ${{ steps.rebuild.outputs.output_path }}
+  image_path:
+    description: Path to the rebuilt compressed Desk Box image.
+    value: ${{ steps.rebuild.outputs.image_path }}
 
 runs:
   using: composite
@@ -56,7 +59,9 @@ runs:
           exit 1
         fi
 
-        sudo ./rebuild \
+        build_id="r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
+        image_basename="desk-box-rk3528-${KERNEL_VERSION}-${build_id}"
+        sudo env DESKBOX_IMAGE_BASENAME="${image_basename}" ./rebuild \
           -b deskbox \
           -a false \
           -k "${KERNEL_VERSION}" \
@@ -64,14 +69,14 @@ runs:
           -n "${BUILDER_NAME// /-}"
 
         rm -f "${input_image}"
-        if ! find "${output_path}" -maxdepth 1 -type f \
-          -name "Armbian_*_rockchip_deskbox_*_${KERNEL_VERSION}_server_*.img.gz" \
-          -print -quit | grep -q .; then
-          echo "Desk Box rebuild produced no image in ${output_path}" >&2
+        image_path="${output_path}/${image_basename}.img.gz"
+        if [[ ! -s "${image_path}" ]]; then
+          echo "Desk Box rebuild produced no image at ${image_path}" >&2
           exit 1
         fi
 
         echo "output_path=${output_path}" >> "${GITHUB_OUTPUT}"
+        echo "image_path=${image_path}" >> "${GITHUB_OUTPUT}"
         ls -lh "${output_path}"
 
 branding:

@@ -1230,7 +1230,8 @@ refactor_rootfs() {
         rm -f etc/custom_service/start_service.sh
         rmdir etc/custom_service 2>/dev/null || true
         rm -f etc/balance_irq etc/modules-load.d/ophub-load-list.conf usr/sbin/balethirq.pl
-        rm -f usr/sbin/armbian-kernel
+        rm -f usr/sbin/armbian-kernel usr/sbin/armbian-update usr/sbin/armbian-sync usr/sbin/armbian-software
+        rm -rf usr/share/ophub/armbian-software
         [[ -f etc/rc.local ]] && sed -i '\|/etc/custom_service/start_service.sh|d' etc/rc.local
 
         # Remove build-time package metadata and caches from the final image.
@@ -1291,6 +1292,14 @@ clean_tmp() {
     losetup -d ${loop_new} 2>/dev/null
 
     cd "${tmp_outpath}"
+    if [[ "${board}" == "deskbox" ]]; then
+        deskbox_image_basename="${DESKBOX_IMAGE_BASENAME:-desk-box-rk3528-${kernel}}"
+        deskbox_image_basename="${deskbox_image_basename%.img}"
+        [[ "${deskbox_image_basename}" =~ ^[A-Za-z0-9._-]+$ ]] ||
+            error_msg "Invalid Desk Box image basename: [ ${deskbox_image_basename} ]"
+        mv -f -- "${armbian_filename}" "${deskbox_image_basename}.img"
+        armbian_filename="${deskbox_image_basename}.img"
+    fi
     # Compress Armbian image file. Prefer pigz when available; otherwise fall back to gzip.
     if command -v pigz >/dev/null 2>&1; then
         pigz -qf "${armbian_filename}"

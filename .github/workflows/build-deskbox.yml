@@ -22,12 +22,12 @@ on:
       kernel_version:
         description: "Exact rk35xx kernel version"
         required: true
-        default: "6.1.157"
+        default: "6.1.174"
         type: string
       kernel_sha256:
         description: "SHA256 of the compressed rk35xx kernel bundle"
         required: true
-        default: "7d9aa2f31ba5de469bfb3ed1730e3ceb0d49b263924caad5be1e2380c60b6879"
+        default: "786f15a8a24ccb24beb915c4a7ac3efaf42071390ce17bd2574f80580a36b84b"
         type: string
 
 permissions:
@@ -173,22 +173,24 @@ jobs:
         id: output
         env:
           KERNEL_VERSION: ${{ inputs.kernel_version }}
+          REBUILT_IMAGE: ${{ steps.rebuild.outputs.image_path }}
         shell: bash
         run: |
           set -euo pipefail
           output_directory="${{ steps.rebuild.outputs.output_path }}"
-          mapfile -t images < <(find "${output_directory}" -maxdepth 1 -type f \
-            -name "Armbian_*_rockchip_deskbox_*_${KERNEL_VERSION}_server_*.img.gz" -print)
-          if [[ "${#images[@]}" -ne 1 ]]; then
-            echo "Expected one Desk Box image, found ${#images[@]}:" >&2
-            printf '  %s\n' "${images[@]:-}"
-            exit 1
-          fi
-
           build_id="r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
           compact_name="desk-box-rk3528-${KERNEL_VERSION}-${build_id}.img.gz"
           image_path="${output_directory}/${compact_name}"
-          mv -- "${images[0]}" "${image_path}"
+          if [[ "${REBUILT_IMAGE}" != "${image_path}" || ! -s "${image_path}" ]]; then
+            echo "Unexpected Desk Box output: ${REBUILT_IMAGE}" >&2
+            exit 1
+          fi
+          embedded_name=$(gzip --name --list --verbose "${image_path}" | tail -n 1 | awk '{print $NF}')
+          if [[ "$(basename "${embedded_name}")" != "${compact_name%.gz}" ]]; then
+            echo "Unexpected gzip embedded filename: ${embedded_name}" >&2
+            exit 1
+          fi
+
           (
             cd "${output_directory}"
             sha256sum "${compact_name}" > "${compact_name}.sha256"
@@ -239,10 +241,15 @@ jobs:
             exit 1
           fi
 
+          kernel_release="${KERNEL_VERSION}-rk35xx-ophub"
+          module_tree="${root}/usr/lib/modules/${kernel_release}"
+          test -f "${boot}/vmlinuz-${kernel_release}"
+          test -d "${module_tree}"
+          test "$(find "${root}/usr/lib/modules" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
           test -z "$(find "${root}/usr/src" -maxdepth 1 -name 'linux-headers-*' -print -quit)"
-          test -z "$(find "${root}/usr/lib/modules" -type l \( -name build -o -name source \) -print -quit)"
-          find "${root}/usr/lib/modules" -type f -name 'aic8800_sdio_bsp.ko' -print -quit | grep -q .
-          find "${root}/usr/lib/modules" -type f -name 'aic8800_sdio_wlan.ko' -print -quit | grep -q .
+          test -z "$(find "${module_tree}" -type l \( -name build -o -name source \) -print -quit)"
+          find "${module_tree}" -type f -name 'aic8800_sdio_bsp.ko' -print -quit | grep -q .
+          find "${module_tree}" -type f -name 'aic8800_sdio_wlan.ko' -print -quit | grep -q .
 
           test "$(cat "${root}/etc/timezone")" = 'Asia/Ho_Chi_Minh'
           test "$(readlink "${root}/etc/localtime")" = '/usr/share/zoneinfo/Asia/Ho_Chi_Minh'
@@ -277,6 +284,10 @@ jobs:
           assert_absent "${root}/usr/share/armbian.bak"
           assert_absent "${root}/usr/lib/bak-nand-sata-install"
           assert_absent "${root}/usr/sbin/armbian-kernel"
+          assert_absent "${root}/usr/sbin/armbian-update"
+          assert_absent "${root}/usr/sbin/armbian-sync"
+          assert_absent "${root}/usr/sbin/armbian-software"
+          assert_absent "${root}/usr/share/ophub/armbian-software"
           if [[ -d "${root}/var/lib/apt/lists" ]] && find "${root}/var/lib/apt/lists" -type f -print -quit | grep -q .; then
             echo "APT package lists remain in final image" >&2
             exit 1
