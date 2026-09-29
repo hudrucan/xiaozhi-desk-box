@@ -190,6 +190,7 @@ jobs:
             echo "Unexpected gzip embedded filename: ${embedded_name}" >&2
             exit 1
           fi
+          echo "Gzip embedded filename: $(basename "${embedded_name}")"
 
           (
             cd "${output_directory}"
@@ -335,7 +336,44 @@ jobs:
           build_id="r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
           release_tag="desk-box-rk3528-${{ inputs.kernel_version }}-${build_id}"
           release_title="${release_tag}"
-          release_notes="Target: deskbox. Base: ${UPSTREAM_REPOSITORY}@${UPSTREAM_TAG}/${UPSTREAM_IMAGE}. Source commit: ${GITHUB_SHA}."
+          image_name=$(basename "${IMAGE_PATH}")
+          image_sha256=$(awk '{print $1}' "${CHECKSUM_PATH}")
+          short_sha="${GITHUB_SHA:0:8}"
+          release_notes="$(printf '%s\n' \
+            '## Desk Box Armbian' \
+            '' \
+            'Purpose-built Debian Bookworm image for the RK3528 Desk Box.' \
+            '' \
+            '### Image' \
+            '' \
+            "- Board profile: \`deskbox\`" \
+            "- Kernel: \`${{ inputs.kernel_version }}-rk35xx-ophub\`" \
+            '- DTB: `rockchip/rk3528-deskbox.dtb`' \
+            '- Wi-Fi: AIC8800D80 SDIO' \
+            "- File: \`${image_name}\`" \
+            "- SHA256: \`${image_sha256}\`" \
+            '' \
+            '### Provenance' \
+            '' \
+            "- Base: \`${UPSTREAM_REPOSITORY}@${UPSTREAM_TAG}/${UPSTREAM_IMAGE}\`" \
+            "- Source: [\`${short_sha}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})" \
+            "- Build: [GitHub Actions run #${GITHUB_RUN_NUMBER}](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})" \
+            '' \
+            '### Automated verification' \
+            '' \
+            '- Pinned input hashes verified.' \
+            '- Final image mounted read-only and audited.' \
+            '- Desk Box identity, single DTB and AIC8800D80 firmware allowlist verified.' \
+            '- Kernel release, AIC8800 SDIO modules and raw bootloader regions verified.' \
+            '- Generic updater/sync/software-center helpers and build artifacts absent.' \
+            '' \
+            '### Flash' \
+            '' \
+            'Flash the `.img.gz` directly with Balena Etcher. The extracted raw image uses the same compact basename.' \
+            '' \
+            '> Hardware status: automated build and image audit passed; microSD boot verification is still required.' \
+            '> Debug login is `root` / `1234`; change it before using an untrusted network.' \
+          )"
           if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo "Refusing to overwrite existing release: ${release_tag}" >&2
             exit 1
