@@ -117,7 +117,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker rmi -f $(docker images -q) 2>/dev/null || true
+          init_started=${SECONDS}
+          echo "Disk before runner cleanup:"
+          df -hT /
           if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
             sudo rm -rf "${AGENT_TOOLSDIRECTORY}"
           fi
@@ -125,11 +127,26 @@ jobs:
           sudo swapoff -a
           sudo rm -f /swapfile /mnt/swapfile
           sudo apt-get -y update
-          sudo apt-get -y purge azure-cli 'ghc*' 'zulu*' 'llvm*' firefox 'google*' 'dotnet*' powershell 'openjdk*' 'mongodb*' 'moby*' || true
-          sudo apt-get -y install $(<.github/build-dependencies.txt)
-          sudo apt-get -y autoremove --purge
+          sudo apt-get -y --no-install-recommends install $(<.github/build-dependencies.txt)
           sudo apt-get clean
           sudo timedatectl set-timezone "${TZ}"
+
+          required_commands=(
+            chroot cmp cpio curl dd df dtc file findmnt flock gzip hexdump jq
+            losetup lsblk lsinitramfs mkfs.ext4 mkfs.xfs mount parted partprobe
+            pigz qemu-aarch64-static rsync sfdisk sha256sum tar tune2fs
+            udevadm umount uuidgen wipefs
+          )
+          for required_command in "${required_commands[@]}"; do
+            command -v "${required_command}" >/dev/null || {
+              echo "Missing build command after dependency install: ${required_command}" >&2
+              exit 1
+            }
+          done
+
+          echo "Disk after runner cleanup:"
+          df -hT /
+          echo "Build environment initialized in $((SECONDS - init_started)) seconds."
 
       - name: Create build volume
         shell: bash
@@ -257,7 +274,7 @@ jobs:
 
           rm -rf "${audit_root}"
           mkdir -p "${audit_root}/boot" "${audit_root}/root"
-          gzip --decompress --stdout "${IMAGE_PATH}" > "${audit_image}"
+          pigz --decompress --stdout "${IMAGE_PATH}" > "${audit_image}"
           audit_loop=$(sudo losetup --find --show --partscan --read-only "${audit_image}")
           sudo udevadm settle
           test -b "${audit_loop}p1"

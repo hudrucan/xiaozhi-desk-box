@@ -52,7 +52,7 @@ runs:
         output_path="${GITHUB_ACTION_PATH}/build/output/images"
         mkdir -p "${output_path}"
         input_image="${output_path}/$(basename "${source_image%.gz}")"
-        gzip --decompress --stdout "${source_image}" > "${input_image}"
+        pigz --decompress --stdout "${source_image}" > "${input_image}"
 
         if [[ "$(basename "${input_image}")" != *-trunk_* ]]; then
           echo "Base image filename must contain -trunk_: ${input_image}" >&2
