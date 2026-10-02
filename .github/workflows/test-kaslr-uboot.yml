@@ -94,15 +94,17 @@ jobs:
           test -s u-boot/u-boot.itb
           test -s u-boot/u-boot-nodtb.bin
           test -s u-boot/u-boot.dtb
-          strings u-boot/u-boot-nodtb.bin | grep -Fq 'set /chosen/kaslr-seed from the hardware RNG'
-          strings u-boot/u-boot-nodtb.bin | grep -Fq 'No RNG device'
+          strings u-boot/u-boot-nodtb.bin > u-boot-strings.txt
+          grep -Fq 'set /chosen/kaslr-seed from the hardware RNG' u-boot-strings.txt
+          grep -Fq 'No RNG device' u-boot-strings.txt
           u-boot/tools/dumpimage -l u-boot/u-boot.itb | tee u-boot-fit.txt
           sha256sum u-boot/u-boot.itb u-boot/u-boot-nodtb.bin u-boot/u-boot.dtb \
             > SHA256SUMS
           cp u-boot/.config u-boot-config
           tar -czf deskbox-kaslr-uboot-test.tar.gz \
             SHA256SUMS u-boot-fit.txt u-boot-config \
-            u-boot/u-boot.itb u-boot/u-boot-nodtb.bin u-boot/u-boot.dtb
+            u-boot-strings.txt u-boot/u-boot.itb \
+            u-boot/u-boot-nodtb.bin u-boot/u-boot.dtb
 
       - name: Upload test artifact
         uses: actions/upload-artifact@v4
