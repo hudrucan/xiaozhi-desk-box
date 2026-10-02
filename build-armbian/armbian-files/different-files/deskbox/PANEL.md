@@ -59,13 +59,15 @@ by `linux_openvfd`; the table above records the observed Desk Box hardware.
 ## Boot and time validity
 
 `deskbox-front-panel-early.service` runs before `sysinit.target` and writes
-`----` as soon as the root filesystem has been remounted. The persistent
+`boot` using the factory Android segment pattern as soon as the root filesystem
+has been remounted. The persistent
 `deskbox-front-panel.service` is ordered after both that oneshot and
 `chrony.service`, so the two processes never drive the panel concurrently.
 
 The Desk Box exposes no RTC device. `fake-hwclock` restores only the last saved
 timestamp and cannot account for time spent powered off, so it is not accepted
-as authoritative. The clock changes from `----` to `HH:MM` only after
+as authoritative. After the early `boot` indicator, the persistent service
+shows `----` until changing to `HH:MM` only after
 `chronyc tracking` reports all of the following in the current boot:
 
 - a non-zero stratum;

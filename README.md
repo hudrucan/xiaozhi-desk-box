@@ -197,12 +197,13 @@ for provenance, offsets and hashes.
 reference box (SHA256
 `a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2`).
 The active binary (SHA256
-`041e0471ea06401e6af663d026913b0fa5cdbcc825b1eac7fbebfe96dc52da74`)
+`debb1f43e2b2b60cf78e3ebff284f841b53b31f736ec22fbe2662cc3492eb819`)
 contains the Lima configuration and UART2_M0 pinmux verified on the same
 microSD installation. The Bluetooth delta selects GPIO3_A0/A1 for UART RX/TX,
 GPIO3_A3 for CTS and GPIO3_A2 for RTS. The existing reset/wake properties are
-unchanged. A normalized comparison against the prior Lima DTB shows no other
-functional device-tree delta.
+unchanged. The FD655 node now records the factory Android wiring, GPIO4_A3 for
+CLK and GPIO4_A2 for DAT. A normalized comparison against the prior binary
+shows only those two hardware-verified FD655 GPIO changes.
 
 The internal `model` (`Rockchip RK3528 Generic TV Box`) and
 `wifi_chip_type` (`ap6275s`) remain untouched. The latter is legacy
@@ -223,13 +224,15 @@ SDIO functions bind. The service uses the hardware-validated H4 transport at
 1.5 Mbps; it does not toggle unverified GPIOs. See
 [`PACKAGES.md`](build-armbian/armbian-files/different-files/deskbox/PACKAGES.md).
 
-The hardware-validated front-panel service shows `----` during early boot,
-switches to local `HH:MM` only after chrony reports a valid NTP reference,
+The hardware-validated front-panel service shows the factory-style `boot`
+pattern during early userspace, then `----` until chrony reports a valid NTP
+reference before switching to local `HH:MM`,
 blinks the colon and reflects Wi-Fi, LAN and external USB state. Time validity
 is latched after the first synchronization, so a later network loss does not
 blank the clock. Clock/alarm, play and pause remain unused. The service
-bit-bangs the seller-proven FD6551 protocol on GPIO4_A2/A3 and requires no DTB
-change. See
+bit-bangs the seller-proven FD6551 protocol on GPIO4_A2/A3; the DTB records the
+same wiring for consistency even though the rk35xx kernel does not bind an
+FD655 driver. See
 [`PANEL.md`](build-armbian/armbian-files/different-files/deskbox/PANEL.md).
 
 ## Repository map

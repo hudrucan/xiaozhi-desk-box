@@ -45,6 +45,7 @@ ICON_COLON = 0x10
 ICON_LAN = 0x20
 ICON_WIFI = 0x40
 DASH = 0x40
+BOOT_SEGMENTS = (0x7C, 0x5C, 0x5C, 0x78)
 
 
 def write_text(path, value):
@@ -221,8 +222,8 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX)
         initialize()
         if placeholder_only:
-            for address in DIGIT_ADDRS:
-                write_register(address, DASH)
+            for address, value in zip(DIGIT_ADDRS, BOOT_SEGMENTS):
+                write_register(address, value)
             write_register(ICON_ADDR, 0)
             return
 

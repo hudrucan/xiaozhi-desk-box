@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           dtb="build-armbian/armbian-files/platform-files/rockchip/bootfs/dtb/rockchip/rk3528-deskbox.dtb"
-          echo "041e0471ea06401e6af663d026913b0fa5cdbcc825b1eac7fbebfe96dc52da74  ${dtb}" | sha256sum --check
+          echo "debb1f43e2b2b60cf78e3ebff284f841b53b31f736ec22fbe2662cc3492eb819  ${dtb}" | sha256sum --check
           echo "f00a2e0b48fd29504292fc46007a505efe275f91b8b1863d499e6c141fc54eb8  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
           firmware="build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio"
           echo "995dbb9e4f2e7b19db838291f52be39af9ab673ad51b270c988216ccff1a720e  ${firmware}/aic_userconfig_8800d80.txt" | sha256sum --check
@@ -73,11 +73,11 @@ jobs:
           echo "f9a3003b6bb7bb79c6d017355c3ce6ba9b64d7f32fb95a8bf8158d6185c04f41  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready" | sha256sum --check
           echo "996408f13c167f0907d97d1bb891bf30a5a5a5cee31d7c762eca0a38a7a86d3a  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock" | sha256sum --check
           echo "dce3bb6794144a5716933c924e358b8e0b2c0b61220e7b34740e8ce9beb5a20c  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-bluetooth.service" | sha256sum --check
-          echo "6849958484ea8562ef472577fb27af0bf0cf15eaf4f9eef197dfa91683a78241  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-front-panel" | sha256sum --check
+          echo "fc98793c00ff26d97cd5a4ab4dae67603dd158cc43efd2b8bd5dce9daaab189f  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-front-panel" | sha256sum --check
           echo "5b1e00b677896714784630e76eb94105f0e2179ddfd89bca9c3b0b6cf69250d9  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel.service" | sha256sum --check
           echo "ff22962bef8b31af381f55cd87388d65dacd63367331af0a8a83ef8d5c12877a  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel-early.service" | sha256sum --check
           installer="build-armbian/armbian-files/different-files/deskbox/rootfs/usr/sbin/deskbox-install-emmc"
-          echo "e923715603e18ebeabd889e6b8c7daaf43464426354bdd12252d39af81ef3dc3  ${installer}" | sha256sum --check
+          echo "f2f6a43ea43cf1d42f36417d326d04085c36b344d536c610a8d952b6b020e7bd  ${installer}" | sha256sum --check
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
           sh -n build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
@@ -262,7 +262,7 @@ jobs:
           grep -qx 'fdtfile=rockchip/rk3528-deskbox.dtb' "${boot}/armbianEnv.txt"
           grep -qx 'console=display' "${boot}/armbianEnv.txt"
           grep -qx 'consoleargs=console=tty1' "${boot}/armbianEnv.txt"
-          echo "041e0471ea06401e6af663d026913b0fa5cdbcc825b1eac7fbebfe96dc52da74  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
+          echo "debb1f43e2b2b60cf78e3ebff284f841b53b31f736ec22fbe2662cc3492eb819  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
           boot_features=$(sudo tune2fs -l "${audit_loop}p1" | sed -n 's/^Filesystem features:[[:space:]]*//p' | tr ' ' '\n' | grep -vx needs_recovery | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')
           test "${boot_features}" = '64bit dir_index dir_nlink ext_attr extent extra_isize filetype flex_bg has_journal huge_file large_file metadata_csum resize_inode sparse_super'
           test "$(sudo tune2fs -l "${audit_loop}p1" | awk -F: '$1 == "Filesystem state" { gsub(/^[[:space:]]+/, "", $2); print $2 }')" = 'clean'
@@ -334,7 +334,7 @@ jobs:
           test -L "${root}/etc/systemd/system/dbus-org.bluez.service"
           echo "Pinned BlueZ package, Desk Box HCI payload and service enablement passed."
 
-          echo "6849958484ea8562ef472577fb27af0bf0cf15eaf4f9eef197dfa91683a78241  ${root}/usr/libexec/deskbox-front-panel" | sha256sum --check
+          echo "fc98793c00ff26d97cd5a4ab4dae67603dd158cc43efd2b8bd5dce9daaab189f  ${root}/usr/libexec/deskbox-front-panel" | sha256sum --check
           echo "5b1e00b677896714784630e76eb94105f0e2179ddfd89bca9c3b0b6cf69250d9  ${root}/etc/systemd/system/deskbox-front-panel.service" | sha256sum --check
           echo "ff22962bef8b31af381f55cd87388d65dacd63367331af0a8a83ef8d5c12877a  ${root}/etc/systemd/system/deskbox-front-panel-early.service" | sha256sum --check
           test -x "${root}/usr/libexec/deskbox-front-panel"
@@ -347,7 +347,7 @@ jobs:
           echo "FD6551 front-panel payload and service enablement passed."
 
           installer="${root}/usr/sbin/deskbox-install-emmc"
-          echo "e923715603e18ebeabd889e6b8c7daaf43464426354bdd12252d39af81ef3dc3  ${installer}" | sha256sum --check
+          echo "f2f6a43ea43cf1d42f36417d326d04085c36b344d536c610a8d952b6b020e7bd  ${installer}" | sha256sum --check
           test -x "${installer}"
           bash -n "${installer}"
           for tool in \
