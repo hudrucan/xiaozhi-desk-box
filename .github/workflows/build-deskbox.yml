@@ -111,24 +111,77 @@ jobs:
           grep -qx 'options aic8800_sdio_wlan country_code=VN custregd=0' \
             build-armbian/armbian-files/different-files/deskbox/rootfs/etc/modprobe.d/aic8800-country.conf
 
-      - name: Initialize build environment
+      # Verify the smallest remote input first. A replaced/mistyped kernel
+      # asset must fail before runner setup, the 773 MiB base download, or any
+      # image work consumes minutes.
+      - name: Download exact rk35xx kernel bundle
+        env:
+          KERNEL_VERSION: ${{ inputs.kernel_version }}
+          KERNEL_SHA256: ${{ inputs.kernel_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          kernel_parent="build-armbian/kernel/rk35xx"
+          kernel_archive="${kernel_parent}/${KERNEL_VERSION}.tar.gz"
+          kernel_url="https://github.com/ophub/kernel/releases/download/kernel_rk35xx/${KERNEL_VERSION}.tar.gz"
+          mkdir -p "${kernel_parent}"
+          curl --fail --show-error --location --retry 3 --output "${kernel_archive}" "${kernel_url}"
+          echo "${KERNEL_SHA256}  ${kernel_archive}" | sha256sum --check
+          tar -mxzf "${kernel_archive}" -C "${kernel_parent}"
+          test -s "${kernel_parent}/${KERNEL_VERSION}/sha256sums"
+          rm -f "${kernel_archive}"
+
+      - name: Identify runner image
+        id: runner-image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_id="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}"
+          image_id=$(printf '%s' "${image_id}" | tr -c 'A-Za-z0-9._-' '-')
+          echo "id=${image_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore rebuild dependency cache
+        id: apt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/deskbox-apt-cache
+          key: deskbox-apt-${{ steps.runner-image.outputs.id }}-${{ hashFiles('.github/build-dependencies.txt') }}
+
+      - name: Install rebuild dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         shell: bash
         run: |
           set -euo pipefail
           init_started=${SECONDS}
-          echo "Disk before runner cleanup:"
+          echo "Disk before dependency installation:"
           df -hT /
-          if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
-            sudo rm -rf "${AGENT_TOOLSDIRECTORY}"
-          fi
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android 2>/dev/null || true
-          sudo swapoff -a
-          sudo rm -f /swapfile /mnt/swapfile
+
+          # ubuntu-24.04 already contains every regular rebuild tool below.
+          # Cache only the four packages absent from a fresh runner; the large
+          # qemu-user-static package is otherwise apt's dominant delay.
+          apt_cache_dir="${RUNNER_TEMP}/deskbox-apt-cache"
+          mkdir -p "${apt_cache_dir}"
           sudo apt-get -y update
-          sudo apt-get -y --no-install-recommends install $(<.github/build-dependencies.txt)
-          sudo apt-get clean
+          shopt -s nullglob
+          cached_debs=("${apt_cache_dir}"/*.deb)
+          if (( ${#cached_debs[@]} == 0 )); then
+            (
+              cd "${apt_cache_dir}"
+              apt-get download \
+                binfmt-support \
+                device-tree-compiler \
+                libfdt1 \
+                qemu-user-static
+            )
+            cached_debs=("${apt_cache_dir}"/*.deb)
+          fi
+          (( ${#cached_debs[@]} == 4 )) || {
+            echo "Expected four cached rebuild dependency packages, found ${#cached_debs[@]}." >&2
+            exit 1
+          }
+          sudo apt-get -y --no-install-recommends install \
+            $(<.github/build-dependencies.txt) "${cached_debs[@]}"
           sudo timedatectl set-timezone "${TZ}"
 
           required_commands=(
@@ -144,18 +197,26 @@ jobs:
             }
           done
 
-          echo "Disk after runner cleanup:"
+          echo "Disk after dependency installation:"
           df -hT /
-          echo "Build environment initialized in $((SECONDS - init_started)) seconds."
+          echo "Rebuild dependencies installed in $((SECONDS - init_started)) seconds."
+
+      - name: Save rebuild dependency cache
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/deskbox-apt-cache
+          key: deskbox-apt-${{ steps.runner-image.outputs.id }}-${{ hashFiles('.github/build-dependencies.txt') }}
 
       - name: Create build volume
         shell: bash
         run: |
           set -euo pipefail
+          readonly volume_size_gib=24
+          readonly reserve_size_gib=4
           root_available_gib=$(df --block-size=1G / | awk 'NR == 2 { print $4 }')
-          volume_size_gib=$((root_available_gib - 4))
-          if (( volume_size_gib <= 0 )); then
-            echo "Insufficient free space on runner root: ${root_available_gib} GiB" >&2
+          if (( root_available_gib < volume_size_gib + reserve_size_gib )); then
+            echo "Need ${volume_size_gib} GiB build space plus ${reserve_size_gib} GiB reserve; runner has ${root_available_gib} GiB free." >&2
             exit 1
           fi
 
@@ -191,26 +252,8 @@ jobs:
           destination="${GITHUB_WORKSPACE}/build/output/images/${UPSTREAM_IMAGE}"
           curl --fail --show-error --location --retry 3 --output "${destination}" "${image_url}"
           echo "${UPSTREAM_SHA256}  ${destination}" | sha256sum --check
-          gzip --test "${destination}"
           echo "path=build/output/images/${UPSTREAM_IMAGE}" >> "${GITHUB_OUTPUT}"
           ls -lh "${destination}"
-
-      - name: Download exact rk35xx kernel bundle
-        env:
-          KERNEL_VERSION: ${{ inputs.kernel_version }}
-          KERNEL_SHA256: ${{ inputs.kernel_sha256 }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          kernel_parent="build-armbian/kernel/rk35xx"
-          kernel_archive="${kernel_parent}/${KERNEL_VERSION}.tar.gz"
-          kernel_url="https://github.com/ophub/kernel/releases/download/kernel_rk35xx/${KERNEL_VERSION}.tar.gz"
-          mkdir -p "${kernel_parent}"
-          curl --fail --show-error --location --retry 3 --output "${kernel_archive}" "${kernel_url}"
-          echo "${KERNEL_SHA256}  ${kernel_archive}" | sha256sum --check
-          tar -mxzf "${kernel_archive}" -C "${kernel_parent}"
-          test -s "${kernel_parent}/${KERNEL_VERSION}/sha256sums"
-          rm -f "${kernel_archive}"
 
       - name: Rebuild Desk Box image
         id: rebuild

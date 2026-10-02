@@ -1,10 +1,8 @@
-binfmt-support
 bsdextrautils
 ca-certificates
 coreutils
 cpio
 curl
-device-tree-compiler
 diffutils
 e2fsprogs
 fdisk
@@ -19,7 +17,6 @@ kmod
 mount
 parted
 pigz
-qemu-user-static
 rsync
 sed
 sudo
