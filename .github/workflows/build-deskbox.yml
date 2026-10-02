@@ -56,10 +56,12 @@ jobs:
         run: |
           set -euo pipefail
           dtb="build-armbian/armbian-files/platform-files/rockchip/bootfs/dtb/rockchip/rk3528-deskbox.dtb"
-          echo "debb1f43e2b2b60cf78e3ebff284f841b53b31f736ec22fbe2662cc3492eb819  ${dtb}" | sha256sum --check
+          dts="build-armbian/armbian-files/different-files/deskbox/dts/rk3528-deskbox.dts"
+          echo "bf284aae2aac156705657c8393f58c21bb1c306030fea5e1d7a78087586b129b  ${dtb}" | sha256sum --check
+          echo "287b252d5b88e54c5b413ac1fe21da6b8cfa782c4bde82f009c13cd62e8ae1d9  ${dts}" | sha256sum --check
           echo "f00a2e0b48fd29504292fc46007a505efe275f91b8b1863d499e6c141fc54eb8  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
           firmware="build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio"
-          echo "995dbb9e4f2e7b19db838291f52be39af9ab673ad51b270c988216ccff1a720e  ${firmware}/aic_userconfig_8800d80.txt" | sha256sum --check
+          echo "8490a8609f8801f9cc33617c975372f4a45b62a59c3728d8975f09de4ed5e678  ${firmware}/aic_userconfig_8800d80.txt" | sha256sum --check
           echo "6d121e015ff1fb90a90649627d663511804771b37f6cb44c97066cfc313a067a  ${firmware}/fmacfw_8800d80_u02.bin" | sha256sum --check
           echo "465106f3bb2945bbdebea99f6cde9465ae00d5829e188499d42449cbdf4fe82c  ${firmware}/fmacfwbt_8800d80_u02.bin" | sha256sum --check
           echo "a526cbd02fcdc495f049f3ad6b5933cb08cd984b16790c716a060d582fee1a56  ${firmware}/fw_adid_8800d80_u02.bin" | sha256sum --check
@@ -73,11 +75,14 @@ jobs:
           echo "f9a3003b6bb7bb79c6d017355c3ce6ba9b64d7f32fb95a8bf8158d6185c04f41  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready" | sha256sum --check
           echo "996408f13c167f0907d97d1bb891bf30a5a5a5cee31d7c762eca0a38a7a86d3a  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock" | sha256sum --check
           echo "dce3bb6794144a5716933c924e358b8e0b2c0b61220e7b34740e8ce9beb5a20c  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-bluetooth.service" | sha256sum --check
+          echo "e924b9300c9f5c9e1f699659f9d45e7ea6861ad006bd411a9b462c7f33b45720  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/bluetooth.service.d/deskbox.conf" | sha256sum --check
+          echo "b457abf72efd178a17056436c946c67c67dcdb4b8e4f3f6b03e2159bd0264594  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/udev/rules.d/10-wifi-disable-powermanagement.rules" | sha256sum --check
+          echo "e113119cb53140e84aa8b78d1c219df954f66f196d35c8d1911a5404783d7ebe  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/tmpfiles.d/journal-nocow.conf" | sha256sum --check
           echo "fc98793c00ff26d97cd5a4ab4dae67603dd158cc43efd2b8bd5dce9daaab189f  build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-front-panel" | sha256sum --check
           echo "5b1e00b677896714784630e76eb94105f0e2179ddfd89bca9c3b0b6cf69250d9  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel.service" | sha256sum --check
           echo "ff22962bef8b31af381f55cd87388d65dacd63367331af0a8a83ef8d5c12877a  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel-early.service" | sha256sum --check
           installer="build-armbian/armbian-files/different-files/deskbox/rootfs/usr/sbin/deskbox-install-emmc"
-          echo "f2f6a43ea43cf1d42f36417d326d04085c36b344d536c610a8d952b6b020e7bd  ${installer}" | sha256sum --check
+          echo "e4300003fc311ab607081dd76aca85f404a4b64482010f8ad1a7443fd2317dda  ${installer}" | sha256sum --check
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
           sh -n build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
@@ -93,9 +98,13 @@ jobs:
           grep -Eq '^r[0-9]+:Desk Box:rk3528:rk3528-deskbox\.dtb:.*:deskbox:yes$' \
             build-armbian/armbian-files/common-files/etc/model_database.conf
           grep -aFq 'Rockchip RK3528 Generic TV Box' "${dtb}"
-          grep -aFq 'ap6275s' "${dtb}"
+          grep -aFq 'aic8800d80' "${dtb}"
+          ! grep -aFq 'ap6275s' "${dtb}"
           grep -aFq 'rockchip,rk3528-mali' "${dtb}"
           grep -aFq 'uart2m0-gpios' "${dtb}"
+          ! grep -Eq '^(loss_enable|loss_value)=' "${firmware}/aic_userconfig_8800d80.txt"
+          ! grep -Eq '^[[:space:]]*net\.netfilter\.nf_conntrack_helper[[:space:]]*=' \
+            build-armbian/armbian-files/common-files/etc/sysctl.conf
           test "$(cat build-armbian/armbian-files/different-files/deskbox/rootfs/etc/timezone)" = "Asia/Ho_Chi_Minh"
           grep -qx 'options cfg80211 ieee80211_regdom=VN' \
             build-armbian/armbian-files/different-files/deskbox/rootfs/etc/modprobe.d/deskbox-regulatory.conf
@@ -262,7 +271,11 @@ jobs:
           grep -qx 'fdtfile=rockchip/rk3528-deskbox.dtb' "${boot}/armbianEnv.txt"
           grep -qx 'console=display' "${boot}/armbianEnv.txt"
           grep -qx 'consoleargs=console=tty1' "${boot}/armbianEnv.txt"
-          echo "debb1f43e2b2b60cf78e3ebff284f841b53b31f736ec22fbe2662cc3492eb819  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
+          echo "bf284aae2aac156705657c8393f58c21bb1c306030fea5e1d7a78087586b129b  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
+          source_dts="${GITHUB_WORKSPACE}/build-armbian/armbian-files/different-files/deskbox/dts/rk3528-deskbox.dts"
+          roundtrip_dtb="${audit_root}/rk3528-deskbox-roundtrip.dtb"
+          dtc -q -I dts -O dtb -o "${roundtrip_dtb}" "${source_dts}"
+          cmp -s "${roundtrip_dtb}" "${boot}/dtb/rockchip/rk3528-deskbox.dtb"
           boot_features=$(sudo tune2fs -l "${audit_loop}p1" | sed -n 's/^Filesystem features:[[:space:]]*//p' | tr ' ' '\n' | grep -vx needs_recovery | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')
           test "${boot_features}" = '64bit dir_index dir_nlink ext_attr extent extra_isize filetype flex_bg has_journal huge_file large_file metadata_csum resize_inode sparse_super'
           test "$(sudo tune2fs -l "${audit_loop}p1" | awk -F: '$1 == "Filesystem state" { gsub(/^[[:space:]]+/, "", $2); print $2 }')" = 'clean'
@@ -299,7 +312,7 @@ jobs:
 
           firmware="${root}/usr/lib/firmware"
           test "$(find "${firmware}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" = $'aic8800_sdio\nregulatory.db\nregulatory.db.p7s'
-          echo "995dbb9e4f2e7b19db838291f52be39af9ab673ad51b270c988216ccff1a720e  ${firmware}/aic8800_sdio/aic_userconfig_8800d80.txt" | sha256sum --check
+          echo "8490a8609f8801f9cc33617c975372f4a45b62a59c3728d8975f09de4ed5e678  ${firmware}/aic8800_sdio/aic_userconfig_8800d80.txt" | sha256sum --check
           echo "6d121e015ff1fb90a90649627d663511804771b37f6cb44c97066cfc313a067a  ${firmware}/aic8800_sdio/fmacfw_8800d80_u02.bin" | sha256sum --check
           echo "465106f3bb2945bbdebea99f6cde9465ae00d5829e188499d42449cbdf4fe82c  ${firmware}/aic8800_sdio/fmacfwbt_8800d80_u02.bin" | sha256sum --check
           echo "a526cbd02fcdc495f049f3ad6b5933cb08cd984b16790c716a060d582fee1a56  ${firmware}/aic8800_sdio/fw_adid_8800d80_u02.bin" | sha256sum --check
@@ -309,6 +322,7 @@ jobs:
           test "$(find "${firmware}/aic8800_sdio" -maxdepth 1 -type f | wc -l)" -eq 7
           echo "9d171281bfe7acc5d203007427f6075b704b7a48ff42ae25b9f490a0118fe7d2  ${firmware}/regulatory.db" | sha256sum --check
           echo "d1170298577027c2da346242627ff6cad09fbebaa96a6b2de07ada7c873dd337  ${firmware}/regulatory.db.p7s" | sha256sum --check
+          ! grep -Eq '^(loss_enable|loss_value)=' "${firmware}/aic8800_sdio/aic_userconfig_8800d80.txt"
           lsinitramfs "${boot}/initrd.img-${kernel_release}" | grep -qx 'usr/lib/firmware/regulatory.db'
           lsinitramfs "${boot}/initrd.img-${kernel_release}" | grep -qx 'usr/lib/firmware/regulatory.db.p7s'
           echo "AIC8800D80 firmware and regulatory allowlist passed."
@@ -329,6 +343,9 @@ jobs:
           grep -Fxq 'After=systemd-modules-load.service systemd-rfkill.service' "${root}/etc/systemd/system/deskbox-bluetooth.service"
           grep -Fxq 'ExecStartPre=/usr/sbin/rfkill unblock bluetooth' "${root}/etc/systemd/system/deskbox-bluetooth.service"
           grep -Fxq 'ExecStartPost=/usr/libexec/deskbox-bluetooth-unblock' "${root}/etc/systemd/system/deskbox-bluetooth.service"
+          grep -Fxq 'ConfigurationDirectoryMode=0755' "${root}/etc/systemd/system/bluetooth.service.d/deskbox.conf"
+          grep -Fxq 'ExecStart=/usr/libexec/bluetooth/bluetoothd --noplugin=sap,vcp,mcp,bap' \
+            "${root}/etc/systemd/system/bluetooth.service.d/deskbox.conf"
           test ! -e "${root}/var/lib/systemd/rfkill"
           test -L "${root}/etc/systemd/system/bluetooth.target.wants/bluetooth.service"
           test -L "${root}/etc/systemd/system/dbus-org.bluez.service"
@@ -347,7 +364,7 @@ jobs:
           echo "FD6551 front-panel payload and service enablement passed."
 
           installer="${root}/usr/sbin/deskbox-install-emmc"
-          echo "f2f6a43ea43cf1d42f36417d326d04085c36b344d536c610a8d952b6b020e7bd  ${installer}" | sha256sum --check
+          echo "e4300003fc311ab607081dd76aca85f404a4b64482010f8ad1a7443fd2317dda  ${installer}" | sha256sum --check
           test -x "${installer}"
           bash -n "${installer}"
           for tool in \
@@ -375,6 +392,14 @@ jobs:
             fi
           done
           echo "Unused watchdog, RPC/NFS, OpenVPN and vnStat services are disabled."
+
+          test ! -e "${root}/var/lib/alsa/asound.state"
+          ! grep -Eq '^[[:space:]]*net\.netfilter\.nf_conntrack_helper[[:space:]]*=' \
+            "${root}/etc/sysctl.conf"
+          grep -Fxq 'SUBSYSTEM=="net", KERNEL=="wlan*", ACTION=="add", RUN+="/sbin/iw dev %k set power_save off"' \
+            "${root}/etc/udev/rules.d/10-wifi-disable-powermanagement.rules"
+          test -f "${root}/etc/tmpfiles.d/journal-nocow.conf"
+          echo "Desk Box stale ALSA, sysctl, Wi-Fi udev and ext4 tmpfiles cleanup passed."
 
           assert_absent() {
             if [[ -e "$1" ]]; then
@@ -458,7 +483,7 @@ jobs:
             "- Kernel: \`${{ inputs.kernel_version }}-rk35xx-ophub\`" \
             '- DTB: `rockchip/rk3528-deskbox.dtb`' \
             '- Wi-Fi: AIC8800D80 SDIO, VN regulatory domain' \
-            '- GPU: Lima (Mali-450)' \
+            '- GPU: Lima kernel driver (Mali-450); Mesa userspace is not bundled yet' \
             '- Bluetooth: AIC8800D80 H4 over UART2_M0 at 1.5 Mbps, BlueZ 5.66' \
             '- Front panel: FD6551 HH:MM clock with Wi-Fi, LAN and USB status' \
             "- File: \`${image_name}\`" \
@@ -474,7 +499,8 @@ jobs:
             '' \
             '- Pinned input hashes verified.' \
             '- Final image mounted read-only and audited.' \
-            '- Desk Box identity, Lima + UART2_M0 DTB delta, regulatory database and AIC8800D80 firmware allowlist verified.' \
+            '- Desk Box identity, canonical DTB round-trip, Batch 1 cleanup, regulatory database and AIC8800D80 firmware allowlist verified.' \
+            '- Stale ALSA state, unsupported AIC keys, obsolete sysctl, over-broad Wi-Fi udev rule and ext4 NOCOW warning removed.' \
             '- BlueZ, UART2_M0 HCI service and deterministic Bluetooth rfkill unblock verified.' \
             '- FD6551 front-panel payload and automatic service enablement verified.' \
             '- Guarded Desk Box SD-to-eMMC installer and vendor-U-Boot-compatible BOOT ext4 profile audited.' \

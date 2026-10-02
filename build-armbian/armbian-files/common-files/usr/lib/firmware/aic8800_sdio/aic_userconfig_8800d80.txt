@@ -79,10 +79,6 @@ lvl_adj_5g_chan_122=0
 lvl_adj_5g_chan_138=0
 lvl_adj_5g_chan_155=0
 
-# txpwr_loss
-loss_enable=0
-loss_value=2
-
 # txpwr_ofst
 ofst_enable=0
 ofst_2g4_11b_chan_1_4=0
@@ -117,6 +113,5 @@ ofst_5g_ofdm_midrate_chan_155=0
 xtal_enable=0
 xtal_cap=24
 xtal_cap_fine=31
-
 
 

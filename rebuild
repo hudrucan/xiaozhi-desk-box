@@ -1272,6 +1272,12 @@ refactor_rootfs() {
         # Bluetooth after systemd-rfkill and before attaching UART H4.
         rm -rf var/lib/systemd/rfkill
 
+        # The upstream arm64 base carries an ALSA state captured from an
+        # unrelated Amlogic GXLLIBRETECHS90 board. Its controls do not exist on
+        # RK3528 and make every sound card restore fail during udev coldplug.
+        # Keep the kernel defaults instead of publishing foreign mixer state.
+        rm -f var/lib/alsa/asound.state
+
         # UART2_M0 and the AIC H4 transport were validated on the reference
         # Desk Box at 1.5 Mbps. Enable the board-specific attachment service;
         # its pre-start helper waits for both AIC SDIO functions to bind.

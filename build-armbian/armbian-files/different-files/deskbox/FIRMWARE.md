@@ -7,12 +7,13 @@ signature verified on the reference Desk Box.
 - Source: `ophub/firmware`
 - Source commit: `4aef5903bc6c04c4bce408c8883bc05f43f168ba`
 - Source path: `firmware/aic8800_sdio`
-- Verification: every file matched the corresponding file on the running
-  Desk Box reference system on 2026-09-29.
+- Verification: every file originally matched the running Desk Box reference
+  system on 2026-09-29. Binary firmware remains exact; the text configuration
+  has the documented two-key cleanup below.
 
 | File | SHA256 |
 | --- | --- |
-| `aic_userconfig_8800d80.txt` | `995dbb9e4f2e7b19db838291f52be39af9ab673ad51b270c988216ccff1a720e` |
+| `aic_userconfig_8800d80.txt` | `8490a8609f8801f9cc33617c975372f4a45b62a59c3728d8975f09de4ed5e678` |
 | `fmacfw_8800d80_u02.bin` | `6d121e015ff1fb90a90649627d663511804771b37f6cb44c97066cfc313a067a` |
 | `fmacfwbt_8800d80_u02.bin` | `465106f3bb2945bbdebea99f6cde9465ae00d5829e188499d42449cbdf4fe82c` |
 | `fw_adid_8800d80_u02.bin` | `a526cbd02fcdc495f049f3ad6b5933cb08cd984b16790c716a060d582fee1a56` |
@@ -23,6 +24,10 @@ signature verified on the reference Desk Box.
 The running kernel requested the patch table, ADID, patch and FMAC firmware
 from this directory. The remaining three files are retained as part of the
 matching AIC8800D80 firmware set, including Bluetooth support.
+
+The text configuration is based on the pinned upstream file. Its unsupported
+`loss_enable` and `loss_value` keys are removed because this exact driver logs
+both as invalid commands; no binary firmware file is modified.
 
 | Regulatory file | SHA256 |
 | --- | --- |

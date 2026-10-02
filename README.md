@@ -44,7 +44,7 @@ device.
 | Active DTB | `rockchip/rk3528-deskbox.dtb` |
 | Device-tree model | `Rockchip RK3528 Generic TV Box` (retained from known-good baseline) |
 | Wi-Fi | AIC8800D80 over SDIO |
-| GPU | Mali-450 using Lima |
+| GPU | Mali-450 with the Lima kernel driver; Mesa userspace is not bundled yet |
 | Bluetooth | AIC8800D80 H4 over UART2_M0 at 1.5 Mbps; BlueZ 5.66 |
 | Front panel | FD6551 HH:MM clock with Wi-Fi, LAN and USB status |
 | Timezone / regulatory domain | `Asia/Ho_Chi_Minh` / `VN` |
@@ -64,8 +64,10 @@ The reference Desk Box uses:
 - Ethernet and removable microSD storage.
 
 The functional baseline for this profile was boot-tested from microSD with
-Ethernet, SSH, multi-user systemd startup, AIC8800D80 Wi-Fi, Lima graphics,
-Bluetooth and the FD6551 front panel operational. Bluetooth HCI Reset, BR/EDR
+Ethernet, SSH, multi-user systemd startup, AIC8800D80 Wi-Fi, the Lima kernel
+driver, Bluetooth and the FD6551 front panel operational. The DRM render nodes
+and Lima binding were verified; accelerated Mesa/EGL userspace remains a
+separate follow-up. Bluetooth HCI Reset, BR/EDR
 and LE controller discovery and a BlueZ scan were validated over UART2_M0 at
 1.5 Mbps with hardware flow control. The board service discards inherited
 build-host rfkill state and explicitly unblocks Bluetooth after
@@ -95,7 +97,8 @@ current Armbian first-login path does not consume it.
 > and fully test the image from SD before considering eMMC installation.
 
 1. Flash the release image to SD and boot the Desk Box from it.
-2. Verify networking, SSH, Wi-Fi, Bluetooth, Lima and the front panel from SD.
+2. Verify networking, SSH, Wi-Fi, Bluetooth, DRM/Lima binding and the front
+   panel from SD.
 3. Review the read-only plan:
 
    ```bash
@@ -197,23 +200,24 @@ for provenance, offsets and hashes.
 reference box (SHA256
 `a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2`).
 The active binary (SHA256
-`debb1f43e2b2b60cf78e3ebff284f841b53b31f736ec22fbe2662cc3492eb819`)
-contains the Lima configuration and UART2_M0 pinmux verified on the same
-microSD installation. The Bluetooth delta selects GPIO3_A0/A1 for UART RX/TX,
-GPIO3_A3 for CTS and GPIO3_A2 for RTS. The existing reset/wake properties are
-unchanged. The FD655 node now records the factory Android wiring, GPIO4_A3 for
-CLK and GPIO4_A2 for DAT. A normalized comparison against the prior binary
-shows only those two hardware-verified FD655 GPIO changes.
+`bf284aae2aac156705657c8393f58c21bb1c306030fea5e1d7a78087586b129b`)
+contains the hardware-verified Lima, UART2_M0 and FD655 configuration plus the
+first warning-cleanup batch tested by cold boot from microSD. UART2 intentionally
+omits DMA and uses the working PIO path; Bluetooth HCI and discovery remain
+functional. The FD655 wiring is GPIO4_A3 for CLK and GPIO4_A2 for DAT.
 
-The internal `model` (`Rockchip RK3528 Generic TV Box`) and
-`wifi_chip_type` (`ap6275s`) remain untouched. The latter is legacy
-Rockchip platform data rather than AIC chip detection: the kernel identifies
-the actual AIC8800D80 through its SDIO IDs and loads the pinned AIC modules and
-firmware. Desk Box identity is supplied by the `deskbox` profile, the active
-DTB filename and runtime metadata outside the opaque DTB.
+The cleanup removes invalid zero-sized DRM loader reservations, the unusable
+OP-TEE and FIQ debugger nodes, supplies the TVE OTP references, selects the
+validated VOP line-buffer mode and corrects `wifi_chip_type` to `aic8800d80`.
+The internal `model` remains `Rockchip RK3528 Generic TV Box`; Desk Box identity
+is supplied by the board profile, DTB filename and runtime metadata. The
+canonical decompiled source recompiles byte-for-byte to the active binary. See
+[`DTB.md`](build-armbian/armbian-files/different-files/deskbox/DTB.md) for the
+exact normalized delta and test status.
 
-The seven AIC8800D80 firmware files are an explicit allowlist matching both the
-reference device and their documented upstream hashes. The tested regulatory
+The seven-file AIC8800D80 payload is an explicit allowlist. Binary firmware
+matches the reference device and pinned upstream hashes; the text configuration
+removes two keys rejected by the running driver. The tested regulatory
 database/signature are included in initramfs, and the driver starts with
 `country_code=VN custregd=0`. See
 [`FIRMWARE.md`](build-armbian/armbian-files/different-files/deskbox/FIRMWARE.md).

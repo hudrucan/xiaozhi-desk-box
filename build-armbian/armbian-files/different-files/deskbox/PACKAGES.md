@@ -29,3 +29,8 @@ verifies them before BlueZ starts. BlueZ `AutoEnable=true` then powers the
 registered controller. HCI Reset, BR/EDR + LE controller registration and a
 BlueZ scan were validated on the reference box, including a reboot with both
 Bluetooth persistence files deliberately set to blocked.
+
+The Desk Box BlueZ drop-in matches the existing `/etc/bluetooth` directory
+mode and disables only the unsupported experimental VCP/MCP/BAP plugins and
+the unavailable telephony SAP backend. Classic A2DP, AVRCP, HID and GATT stay
+enabled.
