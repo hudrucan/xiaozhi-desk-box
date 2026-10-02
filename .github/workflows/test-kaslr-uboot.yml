@@ -1,0 +1,97 @@
+name: Test Desk Box KASLR U-Boot
+
+on:
+  push:
+    branches:
+      - codex/kaslr-uboot-test
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential device-tree-compiler flex \
+            gcc-aarch64-linux-gnu git libssl-dev python3-pyelftools \
+            python3-setuptools swig
+
+      - name: Fetch pinned source and firmware inputs
+        run: |
+          set -euo pipefail
+          git init u-boot
+          git -C u-boot remote add origin https://github.com/radxa/u-boot.git
+          git -C u-boot fetch --depth 1 origin 5c2828916052cae4a3d0d69ab426d4cbc841f63d
+          git -C u-boot checkout --detach FETCH_HEAD
+
+          git init armbian-build
+          git -C armbian-build remote add origin https://github.com/armbian/build.git
+          git -C armbian-build fetch --depth 1 origin 1dfb077e1549174a8dd3b74824beea98ffd73cd0
+          git -C armbian-build checkout --detach FETCH_HEAD
+
+          git clone --depth 1 https://github.com/armbian/rkbin.git rkbin
+
+      - name: Add Hinlink board files and KASLR command
+        run: |
+          set -euo pipefail
+          patch_dir=armbian-build/patch/u-boot/legacy/u-boot-radxa-rk35xx
+          install -m 0644 "${patch_dir}/defconfig/hinlink_rk3528_defconfig" \
+            u-boot/configs/hinlink_rk3528_defconfig
+          install -m 0644 "${patch_dir}/dt/rk3528-hinlink-h28k.dts" \
+            u-boot/arch/arm/dts/rk3528-hinlink-h28k.dts
+          install -m 0644 tools/kaslr-uboot-test/kaslrseed.c u-boot/cmd/kaslrseed.c
+          perl -0pi -e 's{(obj-\$\(CONFIG_CMD_RNG\) \+= rng\.o\n)}{$1obj-\$(CONFIG_CMD_KASLRSEED) += kaslrseed.o\n}' \
+            u-boot/cmd/Makefile
+          perl -0pi -e 's{(\t  Print bytes from the hardware random number generator\.\n)}{$1\nconfig CMD_KASLRSEED\n\tbool "kaslrseed command"\n\tdepends on DM_RNG\n\thelp\n\t  Set /chosen/kaslr-seed from the hardware random number generator.\n}' \
+            u-boot/cmd/Kconfig
+          perl -0pi -e 's{(CONFIG_RNG_ROCKCHIP=y\n)}{$1CONFIG_CMD_KASLRSEED=y\n}' \
+            u-boot/configs/hinlink_rk3528_defconfig
+
+          grep -Fxq 'obj-$(CONFIG_CMD_KASLRSEED) += kaslrseed.o' u-boot/cmd/Makefile
+          grep -Fxq 'config CMD_KASLRSEED' u-boot/cmd/Kconfig
+          test "$(grep -c '^CONFIG_CMD_KASLRSEED=y$' u-boot/configs/hinlink_rk3528_defconfig)" -eq 1
+
+      - name: Build U-Boot FIT only
+        working-directory: u-boot
+        run: |
+          set -euo pipefail
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make hinlink_rk3528_defconfig
+          grep -Fxq 'CONFIG_DM_RNG=y' .config
+          grep -Fxq 'CONFIG_RNG_ROCKCHIP=y' .config
+          grep -Fxq 'CONFIG_CMD_KASLRSEED=y' .config
+          make -j2 BL31="${GITHUB_WORKSPACE}/rkbin/rk35/rk3528_bl31_v1.17.elf" u-boot.itb
+
+      - name: Audit output
+        run: |
+          set -euo pipefail
+          test -s u-boot/u-boot.itb
+          test -s u-boot/u-boot-nodtb.bin
+          test -s u-boot/u-boot.dtb
+          strings u-boot/u-boot-nodtb.bin | grep -Fq 'set /chosen/kaslr-seed from the hardware RNG'
+          strings u-boot/u-boot-nodtb.bin | grep -Fq 'No RNG device'
+          u-boot/tools/dumpimage -l u-boot/u-boot.itb | tee u-boot-fit.txt
+          sha256sum u-boot/u-boot.itb u-boot/u-boot-nodtb.bin u-boot/u-boot.dtb \
+            > SHA256SUMS
+          cp u-boot/.config u-boot-config
+          tar -czf deskbox-kaslr-uboot-test.tar.gz \
+            SHA256SUMS u-boot-fit.txt u-boot-config \
+            u-boot/u-boot.itb u-boot/u-boot-nodtb.bin u-boot/u-boot.dtb
+
+      - name: Upload test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deskbox-kaslr-uboot-test
+          path: deskbox-kaslr-uboot-test.tar.gz
+          if-no-files-found: error
+          retention-days: 7
