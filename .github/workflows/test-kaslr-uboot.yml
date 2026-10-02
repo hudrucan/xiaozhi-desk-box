@@ -91,22 +91,32 @@ jobs:
       - name: Audit output
         run: |
           set -euo pipefail
-          test -s u-boot/u-boot.itb
-          test -s u-boot/u-boot-nodtb.bin
-          strings u-boot/u-boot-nodtb.bin > u-boot-strings.txt
-          grep -F 'kaslr' u-boot-strings.txt || true
-          grep -F 'RNG' u-boot-strings.txt || true
-          u-boot/tools/dumpimage -l u-boot/u-boot.itb | tee u-boot-fit.txt
-          artifacts=(u-boot/u-boot.itb u-boot/u-boot-nodtb.bin)
-          for optional in u-boot/u-boot.dtb u-boot/u-boot.its; do
-            if [ -s "${optional}" ]; then
-              artifacts+=("${optional}")
-            fi
-          done
+          find u-boot -maxdepth 2 -type f \
+            \( -name 'u-boot*' -o -name '*.itb' -o -name '*.its' \) \
+            -printf '%p %s bytes\n' | sort | tee u-boot-output-files.txt
+          mapfile -t artifacts < <(find u-boot -maxdepth 2 -type f \
+            \( -name 'u-boot.itb' -o -name 'uboot.img' \
+               -o -name 'u-boot-nodtb.bin' -o -name 'u-boot.dtb' \
+               -o -name 'u-boot.its' \) -print | sort)
+          test "${#artifacts[@]}" -gt 0
+          nodtb=$(find u-boot -maxdepth 2 -type f -name 'u-boot-nodtb.bin' -print -quit)
+          if [ -n "${nodtb}" ]; then
+            strings "${nodtb}" > u-boot-strings.txt
+            grep -F 'kaslr' u-boot-strings.txt || true
+            grep -F 'RNG' u-boot-strings.txt || true
+          else
+            : > u-boot-strings.txt
+          fi
+          fit=$(find u-boot -maxdepth 2 -type f -name 'u-boot.itb' -print -quit)
+          if [ -n "${fit}" ]; then
+            u-boot/tools/dumpimage -l "${fit}" > u-boot-fit.txt || true
+          else
+            : > u-boot-fit.txt
+          fi
           sha256sum "${artifacts[@]}" > SHA256SUMS
           cp u-boot/.config u-boot-config
           tar -czf deskbox-kaslr-uboot-test.tar.gz \
-            SHA256SUMS u-boot-fit.txt u-boot-config \
+            SHA256SUMS u-boot-fit.txt u-boot-config u-boot-output-files.txt \
             u-boot-strings.txt "${artifacts[@]}"
 
       - name: Upload test artifact
