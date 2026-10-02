@@ -74,6 +74,11 @@ jobs:
               2>&1 | tee -a build.log
             build_rc=${PIPESTATUS[0]}
           fi
+          if [ "${build_rc}" -eq 0 ]; then
+            make BL31="${GITHUB_WORKSPACE}/rkbin/rk35/rk3528_bl31_v1.17.elf" \
+              u-boot.itb 2>&1 | tee -a build.log
+            build_rc=${PIPESTATUS[0]}
+          fi
           if [ "${build_rc}" -ne 0 ]; then
             tail -n 20 build.log | while IFS= read -r line; do
               line=${line//'%'/'%25'}
