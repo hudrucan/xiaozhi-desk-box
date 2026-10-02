@@ -142,7 +142,7 @@ jobs:
 
       - name: Restore rebuild dependency cache
         id: apt-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/deskbox-apt-cache
           key: deskbox-apt-${{ steps.runner-image.outputs.id }}-${{ hashFiles('.github/build-dependencies.txt') }}
@@ -203,7 +203,7 @@ jobs:
 
       - name: Save rebuild dependency cache
         if: steps.apt-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/deskbox-apt-cache
           key: deskbox-apt-${{ steps.runner-image.outputs.id }}-${{ hashFiles('.github/build-dependencies.txt') }}
