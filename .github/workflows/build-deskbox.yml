@@ -27,7 +27,7 @@ on:
       kernel_sha256:
         description: "SHA256 of the compressed rk35xx kernel bundle"
         required: true
-        default: "786f15a8a24ccb24beb915c4a7ac3efaf42071390ce17bd2574f80580a36b84b"
+        default: "c822f4c2dbaa9d20135ef82f388e4e574ca8b5d33b886e7b089b0defd9dbf328"
         type: string
 
 permissions:
