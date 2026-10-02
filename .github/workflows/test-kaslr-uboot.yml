@@ -64,13 +64,28 @@ jobs:
       - name: Build U-Boot FIT only
         working-directory: u-boot
         run: |
-          set -euo pipefail
+          set -uo pipefail
           export CROSS_COMPILE=aarch64-linux-gnu-
-          make hinlink_rk3528_defconfig
+          make hinlink_rk3528_defconfig 2>&1 | tee build.log
+          build_rc=${PIPESTATUS[0]}
+          if [ "${build_rc}" -eq 0 ]; then
+            make -j2 BL31="${GITHUB_WORKSPACE}/rkbin/rk35/rk3528_bl31_v1.17.elf" \
+              u-boot.itb 2>&1 | tee -a build.log
+            build_rc=${PIPESTATUS[0]}
+          fi
+          if [ "${build_rc}" -ne 0 ]; then
+            tail -n 20 build.log | while IFS= read -r line; do
+              line=${line//'%'/'%25'}
+              line=${line//$'\r'/'%0D'}
+              line=${line//$'\n'/'%0A'}
+              echo "::error file=.github/workflows/test-kaslr-uboot.yml,line=1,title=U-Boot compiler::${line}"
+            done
+            exit "${build_rc}"
+          fi
+          set -e
           grep -Fxq 'CONFIG_DM_RNG=y' .config
           grep -Fxq 'CONFIG_RNG_ROCKCHIP=y' .config
           grep -Fxq 'CONFIG_CMD_KASLRSEED=y' .config
-          make -j2 BL31="${GITHUB_WORKSPACE}/rkbin/rk35/rk3528_bl31_v1.17.elf" u-boot.itb
 
       - name: Audit output
         run: |
