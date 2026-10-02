@@ -5,8 +5,8 @@ produces the production binary byte-for-byte:
 
 | Artifact | SHA256 |
 | --- | --- |
-| Canonical DTS | `287b252d5b88e54c5b413ac1fe21da6b8cfa782c4bde82f009c13cd62e8ae1d9` |
-| Production DTB | `bf284aae2aac156705657c8393f58c21bb1c306030fea5e1d7a78087586b129b` |
+| Canonical DTS | `5a556f2229b246a308190df1c9caeb386b7c5766bc5c62367fbd514abdfa9c31` |
+| Production DTB | `eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c` |
 
 The original working reference-box binary had SHA256
 `a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2`.
@@ -36,3 +36,21 @@ The exact production DTB cold-booted successfully from microSD with Wi-Fi,
 AIC8800D80 Bluetooth discovery, CVBS DRM output, Lima kernel binding, sound
 PCM playback and the FD655 front-panel service active. UART2 reports its
 expected interrupt-mode fallback; Bluetooth remains powered and unblocked.
+
+## Validated USB 3.0 delta
+
+The previous DTB limited DWC3 to `high-speed`, exposed only its USB 2.0 PHY and
+left the shared RK3528 Combo PHY disabled. The Android DTB recovered from this
+Desk Box eMMC instead connects DWC3 to both PHYs and enables the Combo PHY in
+USB 3 mode. The production DTS now mirrors that hardware topology by:
+
+- enabling `phy@ffdc0000`;
+- adding the Combo PHY with type `4` to DWC3 `phys` and naming it `usb3-phy`;
+- removing the `maximum-speed = "high-speed"` restriction.
+
+Cold-boot validation on microSD placed a Kingston DataTraveler 3.0 on the xHCI
+SuperSpeed bus at 5000 Mbit/s. A 1 GiB direct read completed at 118 MB/s with no
+USB reset, disconnect or I/O error. Wi-Fi, Bluetooth and both front-panel units
+remained active after the DTB change. Moving the same drive to the physical USB
+2.0 port placed it on the xHCI USB 2.0 companion bus at 480 Mbit/s; a 256 MiB
+direct read completed at 28.3 MB/s without any new reset or I/O error.

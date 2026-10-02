@@ -200,11 +200,14 @@ for provenance, offsets and hashes.
 reference box (SHA256
 `a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2`).
 The active binary (SHA256
-`bf284aae2aac156705657c8393f58c21bb1c306030fea5e1d7a78087586b129b`)
-contains the hardware-verified Lima, UART2_M0 and FD655 configuration plus the
-first warning-cleanup batch tested by cold boot from microSD. UART2 intentionally
-omits DMA and uses the working PIO path; Bluetooth HCI and discovery remain
-functional. The FD655 wiring is GPIO4_A3 for CLK and GPIO4_A2 for DAT.
+`eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c`)
+contains the hardware-verified Lima, UART2_M0, FD655 and USB 3.0 configuration
+plus the first warning-cleanup batch tested by cold boot from microSD. UART2
+intentionally omits DMA and uses the working PIO path; Bluetooth HCI and
+discovery remain functional. The FD655 wiring is GPIO4_A3 for CLK and GPIO4_A2
+for DAT. The RK3528 Combo PHY is enabled for the DWC3 SuperSpeed path; a Kingston
+DataTraveler enumerated through xHCI at 5 Gbit/s and completed a 1 GiB direct
+read at 118 MB/s without resets or I/O errors.
 
 The cleanup removes invalid zero-sized DRM loader reservations, the unusable
 OP-TEE and FIQ debugger nodes, supplies the TVE OTP references, selects the

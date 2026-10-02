@@ -57,8 +57,8 @@ jobs:
           set -euo pipefail
           dtb="build-armbian/armbian-files/platform-files/rockchip/bootfs/dtb/rockchip/rk3528-deskbox.dtb"
           dts="build-armbian/armbian-files/different-files/deskbox/dts/rk3528-deskbox.dts"
-          echo "bf284aae2aac156705657c8393f58c21bb1c306030fea5e1d7a78087586b129b  ${dtb}" | sha256sum --check
-          echo "287b252d5b88e54c5b413ac1fe21da6b8cfa782c4bde82f009c13cd62e8ae1d9  ${dts}" | sha256sum --check
+          echo "eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c  ${dtb}" | sha256sum --check
+          echo "5a556f2229b246a308190df1c9caeb386b7c5766bc5c62367fbd514abdfa9c31  ${dts}" | sha256sum --check
           echo "f00a2e0b48fd29504292fc46007a505efe275f91b8b1863d499e6c141fc54eb8  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
           firmware="build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio"
           echo "8490a8609f8801f9cc33617c975372f4a45b62a59c3728d8975f09de4ed5e678  ${firmware}/aic_userconfig_8800d80.txt" | sha256sum --check
@@ -331,7 +331,7 @@ jobs:
           grep -qx 'fdtfile=rockchip/rk3528-deskbox.dtb' "${boot}/armbianEnv.txt"
           grep -qx 'console=display' "${boot}/armbianEnv.txt"
           grep -qx 'consoleargs=console=tty1' "${boot}/armbianEnv.txt"
-          echo "bf284aae2aac156705657c8393f58c21bb1c306030fea5e1d7a78087586b129b  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
+          echo "eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
           source_dts="${GITHUB_WORKSPACE}/build-armbian/armbian-files/different-files/deskbox/dts/rk3528-deskbox.dts"
           roundtrip_dtb="${audit_root}/rk3528-deskbox-roundtrip.dtb"
           dtc -q -I dts -O dtb -o "${roundtrip_dtb}" "${source_dts}"

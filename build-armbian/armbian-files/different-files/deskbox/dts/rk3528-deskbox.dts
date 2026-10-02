@@ -526,8 +526,8 @@
 			reg = <0x00 0xfe500000 0x00 0x400000>;
 			interrupts = <0x00 0x98 0x04>;
 			dr_mode = "host";
-			phys = <0x1d>;
-			phy-names = "usb2-phy";
+			phys = <0x1d 0x1c 0x04>;
+			phy-names = "usb2-phy", "usb3-phy";
 			phy_type = "utmi_wide";
 			resets = <0x02 0x211>;
 			reset-names = "usb3-otg";
@@ -541,7 +541,6 @@
 			quirk-skip-phy-init;
 			status = "okay";
 			extcon = <0x1e>;
-			maximum-speed = "high-speed";
 			snps,dis_u2_susphy_quirk;
 			snps,usb2-lpm-disable;
 			phandle = <0xa6>;
@@ -2240,7 +2239,7 @@
 		reset-names = "combphy-apb", "combphy";
 		rockchip,pipe-grf = <0x0e>;
 		rockchip,pipe-phy-grf = <0x0e>;
-		status = "disabled";
+		status = "okay";
 		phandle = <0x1c>;
 	};
 
