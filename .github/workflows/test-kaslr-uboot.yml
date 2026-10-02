@@ -50,6 +50,7 @@ jobs:
           install -m 0644 "${patch_dir}/dt/rk3528-hinlink-h28k.dts" \
             u-boot/arch/arm/dts/rk3528-hinlink-h28k.dts
           install -m 0644 tools/kaslr-uboot-test/kaslrseed.c u-boot/cmd/kaslrseed.c
+          sed -i '1s|python2|python3|' u-boot/arch/arm/mach-rockchip/decode_bl31.py
           perl -0pi -e 's{(obj-\$\(CONFIG_CMD_RNG\) \+= rng\.o\n)}{$1obj-\$(CONFIG_CMD_KASLRSEED) += kaslrseed.o\n}' \
             u-boot/cmd/Makefile
           perl -0pi -e 's{(\t  Print bytes from the hardware random number generator\.\n)}{$1\nconfig CMD_KASLRSEED\n\tbool "kaslrseed command"\n\tdepends on DM_RNG\n\thelp\n\t  Set /chosen/kaslr-seed from the hardware random number generator.\n}' \
@@ -70,7 +71,7 @@ jobs:
           build_rc=${PIPESTATUS[0]}
           if [ "${build_rc}" -eq 0 ]; then
             make -j2 BL31="${GITHUB_WORKSPACE}/rkbin/rk35/rk3528_bl31_v1.17.elf" \
-              u-boot.itb 2>&1 | tee -a build.log
+              2>&1 | tee -a build.log
             build_rc=${PIPESTATUS[0]}
           fi
           if [ "${build_rc}" -ne 0 ]; then
