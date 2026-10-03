@@ -59,7 +59,7 @@ jobs:
           dts="build-armbian/armbian-files/different-files/deskbox/dts/rk3528-deskbox.dts"
           echo "eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c  ${dtb}" | sha256sum --check
           echo "5a556f2229b246a308190df1c9caeb386b7c5766bc5c62367fbd514abdfa9c31  ${dts}" | sha256sum --check
-          echo "f00a2e0b48fd29504292fc46007a505efe275f91b8b1863d499e6c141fc54eb8  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
+          echo "ac2ca66613cfe2082daa4ae3137ca06b467551ea46ed362fca0bf811e20f50cc  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
           firmware="build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio"
           echo "8490a8609f8801f9cc33617c975372f4a45b62a59c3728d8975f09de4ed5e678  ${firmware}/aic_userconfig_8800d80.txt" | sha256sum --check
           echo "6d121e015ff1fb90a90649627d663511804771b37f6cb44c97066cfc313a067a  ${firmware}/fmacfw_8800d80_u02.bin" | sha256sum --check
@@ -82,7 +82,7 @@ jobs:
           echo "5b1e00b677896714784630e76eb94105f0e2179ddfd89bca9c3b0b6cf69250d9  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel.service" | sha256sum --check
           echo "ff22962bef8b31af381f55cd87388d65dacd63367331af0a8a83ef8d5c12877a  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel-early.service" | sha256sum --check
           installer="build-armbian/armbian-files/different-files/deskbox/rootfs/usr/sbin/deskbox-install-emmc"
-          echo "e4300003fc311ab607081dd76aca85f404a4b64482010f8ad1a7443fd2317dda  ${installer}" | sha256sum --check
+          echo "67ed4ebe769d5ac538cf5fc11ea269882133a8da4e85e103339362eef25c7d92  ${installer}" | sha256sum --check
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
           sh -n build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
@@ -424,7 +424,7 @@ jobs:
           echo "FD6551 front-panel payload and service enablement passed."
 
           installer="${root}/usr/sbin/deskbox-install-emmc"
-          echo "e4300003fc311ab607081dd76aca85f404a4b64482010f8ad1a7443fd2317dda  ${installer}" | sha256sum --check
+          echo "67ed4ebe769d5ac538cf5fc11ea269882133a8da4e85e103339362eef25c7d92  ${installer}" | sha256sum --check
           test -x "${installer}"
           bash -n "${installer}"
           for tool in \
@@ -511,7 +511,7 @@ jobs:
           printf 'idbloader copies: %s\nidbloader area:   %s\nU-Boot region:    %s\n' "${idb_hash}" "${loader_hash}" "${uboot_hash}"
           test "${idb_hash}" = 'a652135b8f9c00997a6739bd5356cb5758cee539b40fc88fb2f5b844891a9b16'
           test "${loader_hash}" = '50533be4f13708af21f74693f2240fc0e5867f045d0d143249654abc3fb0eb44'
-          test "${uboot_hash}" = '2bef85bc03009c53078c310fd4447cd24bccbb2c2b5fd2e5bff74aa618ec17c1'
+          test "${uboot_hash}" = 'd63b5cb1ff7a8f15b91062a6f548b680415d7dd4086e6e6a8b227718b5d1300d'
 
           echo "Desk Box final-image audit passed."
           sudo du -sh "${boot}" "${root}" "${IMAGE_PATH}"

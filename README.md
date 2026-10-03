@@ -185,6 +185,10 @@ The microSD baseline was verified on the reference device:
 - Linux `6.1.157-rk35xx-ophub` reached multi-user mode;
 - Ethernet, SSH and AIC8800D80 Wi-Fi worked.
 
+The current sanitized U-Boot/FIT was then verified with kernel KASLR enabled
+across three microSD reboots. The kernel `_stext` base changed on every boot,
+systemd reached `running`, and no units failed.
+
 Kernel `6.1.174` is the current build default. Its release checksum and both
 AIC8800 SDIO modules were verified before pinning, and the resulting image has
 completed a successful microSD boot test on the reference Desk Box.
