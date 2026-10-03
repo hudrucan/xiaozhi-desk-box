@@ -369,6 +369,8 @@ jobs:
           grep -qx 'options cfg80211 ieee80211_regdom=VN' "${root}/etc/modprobe.d/deskbox-regulatory.conf"
           grep -qx 'options aic8800_sdio_wlan country_code=VN custregd=0' "${root}/etc/modprobe.d/aic8800-country.conf"
           test "$(readlink "${root}/etc/systemd/system/serial-getty@ttyS2.service")" = '/dev/null'
+          grep -Fxq 'After=systemd-tmpfiles-setup.service' \
+            "${root}/etc/systemd/system/console-setup.service.d/deskbox.conf"
 
           firmware="${root}/usr/lib/firmware"
           test "$(find "${firmware}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" = $'aic8800_sdio\nregulatory.db\nregulatory.db.p7s'
@@ -443,6 +445,8 @@ jobs:
             nfs-client.target
             openvpn.service
             vnstat.service
+            serial-getty@ttyAML0.service
+            serial-getty@ttyFIQ0.service
           )
           for unit in "${disabled_services[@]}"; do
             state=$(sudo systemctl --root="${root}" is-enabled "${unit}" 2>/dev/null || true)
@@ -451,7 +455,7 @@ jobs:
               exit 1
             fi
           done
-          echo "Unused watchdog, RPC/NFS, OpenVPN and vnStat services are disabled."
+          echo "Unused services and foreign serial gettys are disabled."
 
           test ! -e "${root}/var/lib/alsa/asound.state"
           ! grep -Eq '^[[:space:]]*net\.netfilter\.nf_conntrack_helper[[:space:]]*=' \

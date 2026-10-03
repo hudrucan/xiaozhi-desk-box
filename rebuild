@@ -1320,6 +1320,10 @@ refactor_rootfs() {
             nfs-client.target
             openvpn.service
             vnstat.service
+            # These foreign serial ports do not exist on RK3528. Disable
+            # inherited gettys before first boot, not only during firstrun.
+            serial-getty@ttyAML0.service
+            serial-getty@ttyFIQ0.service
         )
         if ! chroot "${tag_rootfs}" /usr/bin/systemctl disable \
             "${deskbox_disabled_services[@]}"; then

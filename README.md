@@ -275,6 +275,10 @@ public profile and workflow remain Desk Box-only.
 
 - A successful workflow proves image structure, hashes and filesystem policy;
   final hardware behavior still requires a microSD boot test.
+- First-boot console setup is ordered after tmpfiles cleanup, and inherited
+  `ttyAML0`/`ttyFIQ0` gettys are disabled before the image boots. See
+  [`BOOT_STARTUP.md`](build-armbian/armbian-files/different-files/deskbox/BOOT_STARTUP.md)
+  for the SD validation and the still-open USB startup issue.
 - The image is a focused device target, not a general RK3528 distribution.
 - eMMC installation is intentionally interactive and Desk Box-specific; the
   destructive path cannot be validated by GitHub Actions.
