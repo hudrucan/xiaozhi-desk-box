@@ -5,8 +5,8 @@ produces the production binary byte-for-byte:
 
 | Artifact | SHA256 |
 | --- | --- |
-| Canonical DTS | `5a556f2229b246a308190df1c9caeb386b7c5766bc5c62367fbd514abdfa9c31` |
-| Production DTB | `eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c` |
+| Canonical DTS | `8b78faaf7051f46777b60f785d8ea4677e4346816230db37a07f0951b1ca34a2` |
+| Production DTB | `c910092b16135b5d5530a5030d0a98db049718c99139312dc9287dd235bc9b5e` |
 
 The original working reference-box binary had SHA256
 `a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2`.
@@ -54,3 +54,26 @@ USB reset, disconnect or I/O error. Wi-Fi, Bluetooth and both front-panel units
 remained active after the DTB change. Moving the same drive to the physical USB
 2.0 port placed it on the xHCI USB 2.0 companion bus at 480 Mbit/s; a 256 MiB
 direct read completed at 28.3 MB/s without any new reset or I/O error.
+
+## Validated PSCI CPU-idle delta
+
+The Rockchip BSP DTS assigned CPU0/1 to `CPU_SLEEP0` but disabled that state,
+while CPU2/3 used the enabled `CPU_SLEEP1` state. Linux initializes the PSCI
+idle driver starting at CPU0 and rolls back all per-CPU registrations when the
+first CPU has no usable state, leaving the system on the architectural WFI
+fallback with `current_driver: none`.
+
+The production DTS enables `CPU_SLEEP0` as PSCI standby (`0x0`) while retaining
+the original PSCI power-down state (`0x10000`) for CPU2/3. Hardware validation
+on microSD with BL31 v1.17 showed:
+
+- PSCI hotplug tests passed;
+- all four CPUs passed 10/10 PSCI suspend cycles with zero errors;
+- CPU0/1 repeatedly entered and resumed from standby with zero rejected entries;
+- CPU2/3 repeatedly entered and resumed from the power-down state;
+- `psci_idle` remained active under the `menu` governor with systemd healthy and
+  no RCU stall, watchdog lockup, oops or panic.
+
+The normalized DTS delta is limited to enabling `CPU_SLEEP0` and changing only
+its suspend parameter from power-down to standby. CPU2/3 retain the original
+Rockchip deep-idle contract.

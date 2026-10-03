@@ -170,11 +170,11 @@
 			CPU_SLEEP0: cpu-sleep0 {
 				compatible = "arm,idle-state";
 				local-timer-stop;
-				arm,psci-suspend-param = <0x10000>;
+				arm,psci-suspend-param = <0x00>;
 				entry-latency-us = <0x78>;
 				exit-latency-us = <0xfa>;
 				min-residency-us = <0x384>;
-				status = "disabled";
+				status = "okay";
 				phandle = <0x09>;
 			};
 

@@ -57,8 +57,8 @@ jobs:
           set -euo pipefail
           dtb="build-armbian/armbian-files/platform-files/rockchip/bootfs/dtb/rockchip/rk3528-deskbox.dtb"
           dts="build-armbian/armbian-files/different-files/deskbox/dts/rk3528-deskbox.dts"
-          echo "eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c  ${dtb}" | sha256sum --check
-          echo "5a556f2229b246a308190df1c9caeb386b7c5766bc5c62367fbd514abdfa9c31  ${dts}" | sha256sum --check
+          echo "c910092b16135b5d5530a5030d0a98db049718c99139312dc9287dd235bc9b5e  ${dtb}" | sha256sum --check
+          echo "8b78faaf7051f46777b60f785d8ea4677e4346816230db37a07f0951b1ca34a2  ${dts}" | sha256sum --check
           echo "ac2ca66613cfe2082daa4ae3137ca06b467551ea46ed362fca0bf811e20f50cc  build-armbian/armbian-files/different-files/deskbox/u-boot/bootloader.bin" | sha256sum --check
           firmware="build-armbian/armbian-files/common-files/usr/lib/firmware/aic8800_sdio"
           echo "8490a8609f8801f9cc33617c975372f4a45b62a59c3728d8975f09de4ed5e678  ${firmware}/aic_userconfig_8800d80.txt" | sha256sum --check
@@ -331,7 +331,7 @@ jobs:
           grep -qx 'fdtfile=rockchip/rk3528-deskbox.dtb' "${boot}/armbianEnv.txt"
           grep -qx 'console=display' "${boot}/armbianEnv.txt"
           grep -qx 'consoleargs=console=tty1' "${boot}/armbianEnv.txt"
-          echo "eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
+          echo "c910092b16135b5d5530a5030d0a98db049718c99139312dc9287dd235bc9b5e  ${boot}/dtb/rockchip/rk3528-deskbox.dtb" | sha256sum --check
           source_dts="${GITHUB_WORKSPACE}/build-armbian/armbian-files/different-files/deskbox/dts/rk3528-deskbox.dts"
           roundtrip_dtb="${audit_root}/rk3528-deskbox-roundtrip.dtb"
           dtc -q -I dts -O dtb -o "${roundtrip_dtb}" "${source_dts}"
@@ -544,6 +544,7 @@ jobs:
             '- DTB: `rockchip/rk3528-deskbox.dtb`' \
             '- Wi-Fi: AIC8800D80 SDIO, VN regulatory domain' \
             '- GPU: Lima kernel driver (Mali-450); Mesa userspace is not bundled yet' \
+            '- CPU idle: PSCI standby on CPU0/1 and PSCI power-down on CPU2/3' \
             '- Bluetooth: AIC8800D80 H4 over UART2_M0 at 1.5 Mbps, BlueZ 5.66' \
             '- Front panel: FD6551 HH:MM clock with Wi-Fi, LAN and USB status' \
             "- File: \`${image_name}\`" \
@@ -559,7 +560,7 @@ jobs:
             '' \
             '- Pinned input hashes verified.' \
             '- Final image mounted read-only and audited.' \
-            '- Desk Box identity, canonical DTB round-trip, Batch 1 cleanup, regulatory database and AIC8800D80 firmware allowlist verified.' \
+            '- Desk Box identity, canonical DTB round-trip, PSCI CPU-idle mapping, Batch 1 cleanup, regulatory database and AIC8800D80 firmware allowlist verified.' \
             '- Stale ALSA state, unsupported AIC keys, obsolete sysctl, over-broad Wi-Fi udev rule and ext4 NOCOW warning removed.' \
             '- BlueZ, UART2_M0 HCI service and deterministic Bluetooth rfkill unblock verified.' \
             '- FD6551 front-panel payload and automatic service enablement verified.' \

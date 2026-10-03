@@ -45,6 +45,7 @@ device.
 | Device-tree model | `Rockchip RK3528 Generic TV Box` (retained from known-good baseline) |
 | Wi-Fi | AIC8800D80 over SDIO |
 | GPU | Mali-450 with the Lima kernel driver; Mesa userspace is not bundled yet |
+| CPU idle | PSCI standby on CPU0/1; PSCI power-down on CPU2/3; `menu` governor |
 | Bluetooth | AIC8800D80 H4 over UART2_M0 at 1.5 Mbps; BlueZ 5.66 |
 | Front panel | FD6551 HH:MM clock with Wi-Fi, LAN and USB status |
 | Timezone / regulatory domain | `Asia/Ho_Chi_Minh` / `VN` |
@@ -204,14 +205,16 @@ for provenance, offsets and hashes.
 reference box (SHA256
 `a918a217d36ef5325c10aeed4c1de70280b52a272559b8f80c54ada66367a5e2`).
 The active binary (SHA256
-`eed4f973c4cb7088f52da8909bc4dc0654fd8a3f50c27eb44a6f0f66a2c7629c`)
-contains the hardware-verified Lima, UART2_M0, FD655 and USB 3.0 configuration
-plus the first warning-cleanup batch tested by cold boot from microSD. UART2
+`c910092b16135b5d5530a5030d0a98db049718c99139312dc9287dd235bc9b5e`)
+contains the hardware-verified Lima, UART2_M0, FD655, USB 3.0 and PSCI CPU-idle
+configuration plus the first warning-cleanup batch tested from microSD. UART2
 intentionally omits DMA and uses the working PIO path; Bluetooth HCI and
 discovery remain functional. The FD655 wiring is GPIO4_A3 for CLK and GPIO4_A2
 for DAT. The RK3528 Combo PHY is enabled for the DWC3 SuperSpeed path; a Kingston
 DataTraveler enumerated through xHCI at 5 Gbit/s and completed a 1 GiB direct
-read at 118 MB/s without resets or I/O errors.
+read at 118 MB/s without resets or I/O errors. CPU0/1 use validated PSCI
+standby, CPU2/3 retain Rockchip's validated power-down state, and the kernel
+registers `psci_idle` under the `menu` governor.
 
 The cleanup removes invalid zero-sized DRM loader reservations, the unusable
 OP-TEE and FIQ debugger nodes, supplies the TVE OTP references, selects the
