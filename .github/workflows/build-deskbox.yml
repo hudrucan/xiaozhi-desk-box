@@ -82,7 +82,7 @@ jobs:
           echo "5b1e00b677896714784630e76eb94105f0e2179ddfd89bca9c3b0b6cf69250d9  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel.service" | sha256sum --check
           echo "ff22962bef8b31af381f55cd87388d65dacd63367331af0a8a83ef8d5c12877a  build-armbian/armbian-files/different-files/deskbox/rootfs/etc/systemd/system/deskbox-front-panel-early.service" | sha256sum --check
           installer="build-armbian/armbian-files/different-files/deskbox/rootfs/usr/sbin/deskbox-install-emmc"
-          echo "67ed4ebe769d5ac538cf5fc11ea269882133a8da4e85e103339362eef25c7d92  ${installer}" | sha256sum --check
+          echo "970bbe52162d1b31c347c3e6452c515fb9c6f4e89d6ff2e5176be541da8ffdd9  ${installer}" | sha256sum --check
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-ready
           test -x build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
           sh -n build-armbian/armbian-files/different-files/deskbox/rootfs/usr/libexec/deskbox-bluetooth-unblock
@@ -424,7 +424,7 @@ jobs:
           echo "FD6551 front-panel payload and service enablement passed."
 
           installer="${root}/usr/sbin/deskbox-install-emmc"
-          echo "67ed4ebe769d5ac538cf5fc11ea269882133a8da4e85e103339362eef25c7d92  ${installer}" | sha256sum --check
+          echo "970bbe52162d1b31c347c3e6452c515fb9c6f4e89d6ff2e5176be541da8ffdd9  ${installer}" | sha256sum --check
           test -x "${installer}"
           bash -n "${installer}"
           for tool in \
