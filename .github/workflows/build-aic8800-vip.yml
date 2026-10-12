@@ -1,0 +1,32 @@
+name: Build Desk Box AIC8800 VIP Candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-aic8800-vip-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential binutils kmod python3 libelf-dev
+      - name: Build and inspect exact-kernel module
+        run: python3 scripts/build_aic8800_vip.py
+      - name: Upload candidate and provenance
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: deskbox-aic8800-no-arp-offload-6.1.174
+          path: output/
+          if-no-files-found: error
+          retention-days: 14
